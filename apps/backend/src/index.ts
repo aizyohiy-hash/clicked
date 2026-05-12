@@ -4,6 +4,8 @@ import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import morgan from 'morgan';
+import { db } from './db/index.js';
+import { sql } from 'drizzle-orm';
 
 dotenv.config();
 
@@ -17,8 +19,13 @@ app.use(cors());
 app.use(express.json());
 app.use(morgan('dev'));
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
+app.get('/health', async (_req, res) => {
+  try {
+    await db.execute(sql`SELECT 1`);
+    res.json({ status: 'ok', db: 'connected' });
+  } catch {
+    res.status(503).json({ status: 'error', db: 'unreachable' });
+  }
 });
 
 io.on('connection', (socket) => {
