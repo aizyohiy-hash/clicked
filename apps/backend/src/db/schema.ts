@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, boolean, integer, pgEnum, numeric } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, uuid, boolean, integer, pgEnum, numeric, index } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 export const users = pgTable('users', {
@@ -44,17 +44,23 @@ export const conversationMembers = pgTable('conversation_members', {
   joinedAt: timestamp('joined_at').notNull().defaultNow(),
 });
 
-export const messages = pgTable('messages', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  conversationId: uuid('conversation_id')
-    .notNull()
-    .references(() => conversations.id, { onDelete: 'cascade' }),
-  senderId: uuid('sender_id')
-    .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  content: text('content').notNull(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-});
+export const messages = pgTable(
+  'messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    senderId: uuid('sender_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    content: text('content').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('messages_content_search_idx').using('gin', sql`to_tsvector('english', ${table.content})`),
+  ],
+);
 
 // ─── Token transfers (#46) ────────────────────────────────────────────────────
 //

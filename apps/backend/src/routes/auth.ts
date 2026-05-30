@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Router } from 'express';
 import type { Request, Response, IRouter } from 'express';
 import { Keypair } from '@stellar/stellar-sdk';
@@ -35,11 +36,19 @@ authRouter.post('/verify', validate(VerifySchema), async (req: Request, res: Res
   // Verify Stellar keypair signature
   try {
     const message = `Sign in to Clicked\nWallet: ${walletAddress}\nNonce: ${nonce}`;
-    const messageBytes = Buffer.from(message);
-    const signatureBytes = Buffer.from(signature, 'hex');
+    const rawMessageBytes = Buffer.from(message);
+    const freighterMessageBytes = createHash('sha256')
+      .update(`Stellar Signed Message:\n${message}`)
+      .digest();
     const keypair = Keypair.fromPublicKey(walletAddress);
+    const hexSignatureBytes = Buffer.from(signature, 'hex');
+    const base64SignatureBytes = Buffer.from(signature, 'base64');
 
-    if (!keypair.verify(messageBytes, signatureBytes)) {
+    const isValidSignature =
+      keypair.verify(rawMessageBytes, hexSignatureBytes) ||
+      keypair.verify(freighterMessageBytes, base64SignatureBytes);
+
+    if (!isValidSignature) {
       res.status(401).json({ error: 'Signature verification failed' });
       return;
     }
