@@ -5,19 +5,22 @@ import { HowItWorks } from "@/components/landing/HowItWorks";
 import { TechStack } from "@/components/landing/TechStack";
 import { CTA } from "@/components/landing/CTA";
 import { Footer } from "@/components/landing/Footer";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 
 export default function LandingPage() {
   return (
-    <>
-      <Navbar />
-      <main>
-        <Hero />
-        <Features />
-        <HowItWorks />
-        <TechStack />
-        <CTA />
-      </main>
-      <Footer />
-    </>
+    <ProtectedRoute mode="unauthenticated">
+      <>
+        <Navbar />
+        <main>
+          <Hero />
+          <Features />
+          <HowItWorks />
+          <TechStack />
+          <CTA />
+        </main>
+        <Footer />
+      </>
+    </ProtectedRoute>
   );
 }

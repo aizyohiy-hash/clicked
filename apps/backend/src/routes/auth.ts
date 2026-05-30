@@ -1,21 +1,20 @@
+import { createHash } from 'node:crypto';
 import { Router } from 'express';
+import type { Request, Response, IRouter } from 'express';
 import { Keypair } from '@stellar/stellar-sdk';
 import { db } from '../db/index.js';
 import { users, wallets } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { createNonce, consumeNonce } from '../lib/nonce.js';
 import { signToken } from '../lib/jwt.js';
+import { validate } from '../middleware/validate.js';
+import { ChallengeSchema, VerifySchema, type ChallengeBody, type VerifyBody } from '../schemas/auth.schemas.js';
 
-export const authRouter = Router();
+export const authRouter: IRouter = Router();
 
 // Step 1: client requests a challenge nonce for a wallet address
-authRouter.post('/challenge', (req, res) => {
-  const { walletAddress } = req.body as { walletAddress?: string };
-
-  if (!walletAddress) {
-    res.status(400).json({ error: 'walletAddress is required' });
-    return;
-  }
+authRouter.post('/challenge', validate(ChallengeSchema), (req: Request, res: Response) => {
+  const { walletAddress } = req.body as ChallengeBody;
 
   const nonce = createNonce(walletAddress);
   const message = `Sign in to Clicked\nWallet: ${walletAddress}\nNonce: ${nonce}`;
@@ -24,17 +23,8 @@ authRouter.post('/challenge', (req, res) => {
 });
 
 // Step 2: client signs the message and submits the signature
-authRouter.post('/verify', async (req, res) => {
-  const { walletAddress, signature, nonce } = req.body as {
-    walletAddress?: string;
-    signature?: string;
-    nonce?: string;
-  };
-
-  if (!walletAddress || !signature || !nonce) {
-    res.status(400).json({ error: 'walletAddress, signature, and nonce are required' });
-    return;
-  }
+authRouter.post('/verify', validate(VerifySchema), async (req: Request, res: Response) => {
+  const { walletAddress, signature, nonce } = req.body as VerifyBody;
 
   // Validate and consume nonce
   const valid = consumeNonce(walletAddress, nonce);
@@ -46,11 +36,19 @@ authRouter.post('/verify', async (req, res) => {
   // Verify Stellar keypair signature
   try {
     const message = `Sign in to Clicked\nWallet: ${walletAddress}\nNonce: ${nonce}`;
-    const messageBytes = Buffer.from(message);
-    const signatureBytes = Buffer.from(signature, 'hex');
+    const rawMessageBytes = Buffer.from(message);
+    const freighterMessageBytes = createHash('sha256')
+      .update(`Stellar Signed Message:\n${message}`)
+      .digest();
     const keypair = Keypair.fromPublicKey(walletAddress);
+    const hexSignatureBytes = Buffer.from(signature, 'hex');
+    const base64SignatureBytes = Buffer.from(signature, 'base64');
 
-    if (!keypair.verify(messageBytes, signatureBytes)) {
+    const isValidSignature =
+      keypair.verify(rawMessageBytes, hexSignatureBytes) ||
+      keypair.verify(freighterMessageBytes, base64SignatureBytes);
+
+    if (!isValidSignature) {
       res.status(401).json({ error: 'Signature verification failed' });
       return;
     }

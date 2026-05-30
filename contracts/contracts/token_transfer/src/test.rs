@@ -135,3 +135,73 @@ fn test_transfer_requires_sender_auth() {
     let auths = env.auths();
     assert!(auths.iter().any(|(addr, _)| *addr == sender));
 }
+
+// ── #44 — Admin-only contract upgrade ───────────────────────────────────────
+
+/// Deploy a fresh contract whose admin is `admin`, without going through the
+/// shared `setup()` helper (which generates the admin internally).
+fn setup_with_admin(env: &Env, admin: &Address) -> Address {
+    let token_admin = Address::generate(env);
+    let token_id = env.register(mock_token::MockToken, ());
+    let _ = (token_admin, &token_id); // keep names symmetric with setup()
+
+    let contract_id = env.register(TokenTransferContract, ());
+    let client = TokenTransferContractClient::new(env, &contract_id);
+    client.initialize(admin, &token_id);
+    contract_id
+}
+
+#[test]
+fn test_upgrade_requires_admin_auth() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = setup_with_admin(&env, &admin);
+    let client = TokenTransferContractClient::new(&env, &contract_id);
+
+    // Hash bytes don't need to point at a real installed wasm for the auth
+    // assertion below — we just need require_auth() to fire.
+    let wasm_hash = soroban_sdk::BytesN::from_array(&env, &[0xab; 32]);
+
+    // Call should succeed when admin auths are mocked; what we're after is
+    // that the admin's signature was demanded.
+    //
+    // The actual `update_current_contract_wasm` host fn will fail because
+    // no wasm with that hash is installed — so we catch the panic and only
+    // check the auth side of the contract.
+    let _ = std::panic::catch_unwind(|| {
+        client.upgrade(&wasm_hash);
+    });
+
+    let auths = env.auths();
+    assert!(
+        auths.iter().any(|(addr, _)| *addr == admin),
+        "upgrade must require admin auth",
+    );
+}
+
+#[test]
+#[should_panic]
+fn test_upgrade_non_admin_panics() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let contract_id = setup_with_admin(&env, &admin);
+    let client = TokenTransferContractClient::new(&env, &contract_id);
+
+    // Only mock auths for a non-admin address. The contract should panic
+    // when require_auth() is invoked on `admin` because that address has
+    // not signed.
+    let intruder = Address::generate(&env);
+    env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &intruder,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "upgrade",
+            args: soroban_sdk::vec![&env],
+            sub_invokes: &[],
+        },
+    }]);
+
+    let wasm_hash = soroban_sdk::BytesN::from_array(&env, &[0xcd; 32]);
+    client.upgrade(&wasm_hash);
+}

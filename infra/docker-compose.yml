@@ -12,6 +12,14 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    # #49 — Healthcheck so dependants (and `docker compose up --wait`) can
+    # gate on database readiness instead of racing the boot.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d clicked"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
   redis:
     image: redis:7-alpine
@@ -20,6 +28,14 @@ services:
     volumes:
       - redis_data:/data
     restart: unless-stopped
+    # #49 — Healthcheck via `redis-cli ping`. Same cadence as postgres so a
+    # single `docker compose up --wait` reports both as `(healthy)` together.
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 2s
 
 volumes:
   postgres_data:

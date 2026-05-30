@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, boolean, pgEnum } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, uuid, boolean, integer, pgEnum, numeric, index } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 export const users = pgTable('users', {
@@ -38,19 +38,50 @@ export const conversationMembers = pgTable('conversation_members', {
   userId: uuid('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
+  lastReadMessageId: uuid('last_read_message_id').references(() => messages.id, {
+    onDelete: 'set null',
+  }),
   joinedAt: timestamp('joined_at').notNull().defaultNow(),
 });
 
-export const messages = pgTable('messages', {
+export const messages = pgTable(
+  'messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    senderId: uuid('sender_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    content: text('content').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('messages_content_search_idx').using('gin', sql`to_tsvector('english', ${table.content})`),
+  ],
+);
+
+// ─── Token transfers (#46) ────────────────────────────────────────────────────
+//
+// One row per Soroban `transfer` event the listener (services/stellarListener.ts)
+// pulls off the contract. The `txHash` is unique so reconnects + replayed event
+// pages upsert cleanly instead of producing duplicates.
+
+export const tokenTransfers = pgTable('token_transfers', {
   id: uuid('id').primaryKey().defaultRandom(),
-  conversationId: uuid('conversation_id')
-    .notNull()
-    .references(() => conversations.id, { onDelete: 'cascade' }),
-  senderId: uuid('sender_id')
-    .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  content: text('content').notNull(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
+  txHash: text('tx_hash').notNull().unique(),
+  ledger: integer('ledger').notNull(),
+  fromAddress: text('from_address').notNull(),
+  toAddress: text('to_address').notNull(),
+  amount: numeric('amount', { precision: 38, scale: 0 }).notNull(),
+  /** Raw memo bytes (hex); the listener decodes this as a message UUID and
+   *  joins to `messages.id` when present. */
+  memoHex: text('memo_hex'),
+  messageId: uuid('message_id').references(() => messages.id, {
+    onDelete: 'set null',
+  }),
+  observedAt: timestamp('observed_at').notNull().defaultNow(),
 });
 
 // ─── Relations ────────────────────────────────────────────────────────────────
@@ -97,3 +128,5 @@ export type NewConversation = typeof conversations.$inferInsert;
 export type ConversationMember = typeof conversationMembers.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
+export type TokenTransfer = typeof tokenTransfers.$inferSelect;
+export type NewTokenTransfer = typeof tokenTransfers.$inferInsert;
