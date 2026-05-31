@@ -4,7 +4,7 @@ mod storage;
 mod token_interface;
 mod test;
 
-use soroban_sdk::{contract, contractimpl, Address, Bytes, Env, Symbol};
+use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, Symbol};
 use storage::{DataKey, TransferEvent};
 use token_interface::TokenClient;
 
@@ -85,5 +85,21 @@ impl TokenTransferContract {
             .expect("not initialized");
         admin.require_auth();
         env.storage().instance().set(&DataKey::TokenContract, &new_token);
+    }
+
+    /// Admin-only contract upgrade (#44). Swaps the contract's wasm in-place
+    /// to the binary identified by `new_wasm_hash` (typically produced by
+    /// `soroban contract install --wasm <new.wasm>`).
+    ///
+    /// Mirrors the canonical Soroban upgrade pattern; any non-admin caller
+    /// is rejected at `admin.require_auth()`.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
     }
 }

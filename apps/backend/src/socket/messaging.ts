@@ -3,6 +3,7 @@ import { and, eq, lt, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { conversations, conversationMembers, messages } from '../db/schema.js';
 import type { AuthSocket } from '../middleware/socketAuth.js';
+import { redis, convCacheKey } from '../lib/redis.js';
 
 const PAGE_SIZE = 30;
 
@@ -60,6 +61,14 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       .returning();
 
     io.to(conversationId).emit('new_message', message);
+
+    // Invalidate conversation-list cache for all members so next fetch is fresh
+    if (redis) {
+      const members = await db.query.conversationMembers.findMany({
+        where: eq(conversationMembers.conversationId, conversationId),
+      });
+      await Promise.allSettled(members.map((m) => redis!.del(convCacheKey(m.userId))));
+    }
   });
 
   // ── message_history ────────────────────────────────────────────────────────
@@ -103,6 +112,53 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
     socket.emit('message_history', { conversationId, messages: history.reverse() });
   });
 
+  // ── message_read ───────────────────────────────────────────────────────────
+  // Payload: { conversationId: string; lastReadMessageId: string }
+  // Persists the caller's read position and broadcasts to the room.
+  socket.on(
+    'message_read',
+    async (payload: { conversationId: string; lastReadMessageId: string }) => {
+      const { conversationId, lastReadMessageId } = payload;
+
+      const membership = await db.query.conversationMembers.findFirst({
+        where: and(
+          eq(conversationMembers.conversationId, conversationId),
+          eq(conversationMembers.userId, userId),
+        ),
+      });
+
+      if (!membership) {
+        socket.emit('error', { event: 'message_read', message: 'Not a member of this conversation' });
+        return;
+      }
+
+      // Ensure message exists in this conversation (prevents spoofed reads)
+      const message = await db.query.messages.findFirst({
+        where: and(
+          eq(messages.id, lastReadMessageId),
+          eq(messages.conversationId, conversationId),
+        ),
+      });
+
+      if (!message) {
+        socket.emit('error', { event: 'message_read', message: 'Message not found in conversation' });
+        return;
+      }
+
+      await db
+        .update(conversationMembers)
+        .set({ lastReadMessageId })
+        .where(
+          and(
+            eq(conversationMembers.conversationId, conversationId),
+            eq(conversationMembers.userId, userId),
+          ),
+        );
+
+      io.to(conversationId).emit('read_receipt', { userId, lastReadMessageId });
+    },
+  );
+
   // ── create_conversation ────────────────────────────────────────────────────
   // Payload: { type: 'dm'|'group'; name?: string; memberIds: string[] }
   // Creates a conversation and adds all members (including caller).
@@ -128,6 +184,11 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
         .values(allMembers.map((uid) => ({ conversationId: conversation.id, userId: uid })));
 
       socket.emit('conversation_created', conversation);
+
+      // Invalidate conversation-list cache for all new members
+      if (redis) {
+        await Promise.allSettled(allMembers.map((uid) => redis!.del(convCacheKey(uid))));
+      }
     },
   );
 }

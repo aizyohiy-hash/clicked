@@ -23,15 +23,19 @@
   "license": "ISC",
   "packageManager": "pnpm@10.28.1",
   "dependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
     "@stellar/stellar-sdk": "^15.1.0",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "drizzle-orm": "^0.45.2",
     "express": "^5.2.1",
+    "ioredis": "^5.11.0",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.1",
     "postgres": "^3.4.9",
-    "socket.io": "^4.8.3"
+    "redis": "^6.0.0",
+    "socket.io": "^4.8.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -40,10 +44,12 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/morgan": "^1.9.10",
     "@types/node": "^20.19.37",
+    "@types/supertest": "^7.2.0",
     "@vitest/coverage-v8": "^4.1.6",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.39.4",
     "prettier": "^3.8.3",
+    "supertest": "^7.2.2",
     "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
