@@ -88,7 +88,9 @@ describe('message_read socket event', () => {
     const { registerMessagingHandlers } = await import('../socket/messaging.js');
     registerMessagingHandlers(io as never, socket as never);
 
-    const handler = (socket as EventEmitter).listeners('message_read')[0] as (p: unknown) => Promise<void>;
+    const handler = (socket as EventEmitter).listeners('message_read')[0] as (
+      p: unknown,
+    ) => Promise<void>;
     await handler({ conversationId, lastReadMessageId });
 
     expect(mockUpdate).toHaveBeenCalled();
@@ -105,13 +107,18 @@ describe('message_read socket event', () => {
     const { registerMessagingHandlers } = await import('../socket/messaging.js');
     registerMessagingHandlers(io as never, socket as never);
 
-    const handler = (socket as EventEmitter).listeners('message_read')[0] as (p: unknown) => Promise<void>;
+    const handler = (socket as EventEmitter).listeners('message_read')[0] as (
+      p: unknown,
+    ) => Promise<void>;
     await handler({ conversationId: 'conv-x', lastReadMessageId: 'msg-1' });
 
-    expect(socket.emit).toHaveBeenCalledWith('error', expect.objectContaining({
-      event: 'message_read',
-      message: expect.stringContaining('member'),
-    }));
+    expect(socket.emit).toHaveBeenCalledWith(
+      'error',
+      expect.objectContaining({
+        event: 'message_read',
+        message: expect.stringContaining('member'),
+      }),
+    );
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
@@ -130,13 +137,18 @@ describe('message_read socket event', () => {
     const { registerMessagingHandlers } = await import('../socket/messaging.js');
     registerMessagingHandlers(io as never, socket as never);
 
-    const handler = (socket as EventEmitter).listeners('message_read')[0] as (p: unknown) => Promise<void>;
+    const handler = (socket as EventEmitter).listeners('message_read')[0] as (
+      p: unknown,
+    ) => Promise<void>;
     await handler({ conversationId: 'conv-1', lastReadMessageId: 'wrong-msg' });
 
-    expect(socket.emit).toHaveBeenCalledWith('error', expect.objectContaining({
-      event: 'message_read',
-      message: expect.stringContaining('Message not found'),
-    }));
+    expect(socket.emit).toHaveBeenCalledWith(
+      'error',
+      expect.objectContaining({
+        event: 'message_read',
+        message: expect.stringContaining('Message not found'),
+      }),
+    );
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
@@ -159,7 +171,9 @@ describe('message_read socket event', () => {
     const { registerMessagingHandlers } = await import('../socket/messaging.js');
     registerMessagingHandlers(io as never, socket as never);
 
-    const handler = (socket as EventEmitter).listeners('message_read')[0] as (p: unknown) => Promise<void>;
+    const handler = (socket as EventEmitter).listeners('message_read')[0] as (
+      p: unknown,
+    ) => Promise<void>;
     await handler({ conversationId: 'conv-2', lastReadMessageId });
 
     expect(setFn).toHaveBeenCalledWith({ lastReadMessageId });

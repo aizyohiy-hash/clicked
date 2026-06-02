@@ -132,20 +132,23 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       });
 
       if (!membership) {
-        socket.emit('error', { event: 'message_read', message: 'Not a member of this conversation' });
+        socket.emit('error', {
+          event: 'message_read',
+          message: 'Not a member of this conversation',
+        });
         return;
       }
 
       // Ensure message exists in this conversation (prevents spoofed reads)
       const message = await db.query.messages.findFirst({
-        where: and(
-          eq(messages.id, lastReadMessageId),
-          eq(messages.conversationId, conversationId),
-        ),
+        where: and(eq(messages.id, lastReadMessageId), eq(messages.conversationId, conversationId)),
       });
 
       if (!message) {
-        socket.emit('error', { event: 'message_read', message: 'Message not found in conversation' });
+        socket.emit('error', {
+          event: 'message_read',
+          message: 'Message not found in conversation',
+        });
         return;
       }
 
@@ -239,7 +242,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
   // Forwards to AI agent and posts reply from reserved assistant user.
   // Rate-limit: 5 requests per user per minute.
   const ASSISTANT_USER_ID = '00000000-0000-4000-8000-000000000000';
-  
+
   socket.on('ask_assistant', async (payload: { conversationId: string; content: string }) => {
     const { conversationId, content } = payload;
 
@@ -255,7 +258,10 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
     });
 
     if (!membership) {
-      socket.emit('error', { event: 'ask_assistant', message: 'Not a member of this conversation' });
+      socket.emit('error', {
+        event: 'ask_assistant',
+        message: 'Not a member of this conversation',
+      });
       return;
     }
 
@@ -287,7 +293,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
         throw new Error('AI agent error');
       }
 
-      const data = await response.json() as { reply: string };
+      const data = (await response.json()) as { reply: string };
 
       // Ensure assistant user exists (upsert)
       // Usually done via migration, but we can safely do it here or assume it exists.
@@ -323,7 +329,6 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       });
 
       await invalidateConversationCaches(members.map((member) => member.userId));
-
     } catch (err) {
       console.error('ask_assistant error:', err);
       socket.emit('error', { event: 'ask_assistant', message: 'Failed to get AI reply' });

@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
+import { Spinner } from "@/components/ui/Spinner";
 
 const MAX_CHARS = 2000;
 const SOFT_COUNT_THRESHOLD = 1800;
@@ -125,7 +126,7 @@ export function MessageInput({ disabled, isSending, onSend, socket, conversation
           disabled={disabled || isSending || !value.trim()}
           className="inline-flex items-center gap-2 rounded-full bg-[#0F172A] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#1E293B] disabled:cursor-not-allowed disabled:bg-[#94A3B8]"
         >
-          {isSending ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" /> : null}
+          {isSending ? <Spinner size="sm" label="Sending..." /> : null}
           {isSending ? "Sending..." : "Send"}
         </button>
       </div>

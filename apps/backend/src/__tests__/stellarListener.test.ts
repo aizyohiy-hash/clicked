@@ -14,10 +14,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 
-import {
-  runForever,
-  type StellarTransferEvent,
-} from '../services/stellarListener.js';
+import { runForever, type StellarTransferEvent } from '../services/stellarListener.js';
 
 function makeEvent(overrides: Partial<StellarTransferEvent> = {}): StellarTransferEvent {
   return {
@@ -42,13 +39,10 @@ function silentLogger() {
 describe('stellarListener.runForever', () => {
   it('persists every event the fetcher returns', async () => {
     const events: StellarTransferEvent[][] = [
-      [
-        makeEvent({ txHash: 'a', cursor: 'c-a' }),
-        makeEvent({ txHash: 'b', cursor: 'c-b' }),
-      ],
+      [makeEvent({ txHash: 'a', cursor: 'c-a' }), makeEvent({ txHash: 'b', cursor: 'c-b' })],
       [makeEvent({ txHash: 'c', cursor: 'c-c' })],
     ];
-    const persist = vi.fn(async () => {});
+    const persist = vi.fn(async (_event: StellarTransferEvent) => {});
     const ctl = new AbortController();
     let call = 0;
 
@@ -68,13 +62,13 @@ describe('stellarListener.runForever', () => {
     });
 
     expect(persist).toHaveBeenCalledTimes(3);
-    expect(persist.mock.calls[0][0].txHash).toBe('a');
-    expect(persist.mock.calls[1][0].txHash).toBe('b');
-    expect(persist.mock.calls[2][0].txHash).toBe('c');
+    expect(persist.mock.calls[0]![0].txHash).toBe('a');
+    expect(persist.mock.calls[1]![0].txHash).toBe('b');
+    expect(persist.mock.calls[2]![0].txHash).toBe('c');
   });
 
   it('reconnects after a fetch failure (backoff, then success)', async () => {
-    const persist = vi.fn(async () => {});
+    const persist = vi.fn(async (_event: StellarTransferEvent) => {});
     const ctl = new AbortController();
     let call = 0;
 
@@ -100,7 +94,7 @@ describe('stellarListener.runForever', () => {
 
     expect(call).toBeGreaterThanOrEqual(2);
     expect(persist).toHaveBeenCalledTimes(1);
-    expect(persist.mock.calls[0][0].txHash).toBe('after-reconnect');
+    expect(persist.mock.calls[0]![0].txHash).toBe('after-reconnect');
   });
 
   it('does not crash when persist throws — logs and keeps polling', async () => {
@@ -109,7 +103,7 @@ describe('stellarListener.runForever', () => {
     let call = 0;
     let persistCalls = 0;
 
-    const persist = vi.fn(async () => {
+    const persist = vi.fn(async (_event: StellarTransferEvent) => {
       persistCalls += 1;
       if (persistCalls === 1) {
         throw new Error('db unique violation');
@@ -147,7 +141,7 @@ describe('stellarListener.runForever', () => {
     let call = 0;
     const cursors: (string | null)[] = [];
 
-    const persist = vi.fn(async () => {
+    const persist = vi.fn(async (_event: StellarTransferEvent) => {
       throw new Error('db down');
     });
 

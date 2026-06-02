@@ -5,7 +5,6 @@ export async function invalidateConversationCaches(userIds: string[]): Promise<v
     return;
   }
 
-  await Promise.allSettled(
-    [...new Set(userIds)].map((userId) => redis.del(convCacheKey(userId))),
-  );
+  const client = redis;
+  await Promise.allSettled([...new Set(userIds)].map((userId) => client.del(convCacheKey(userId))));
 }

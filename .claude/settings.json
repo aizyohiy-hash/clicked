@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm add *)",
+      "Bash(node --experimental-vm-modules /tmp/ip-probe.mjs)",
+      "Bash(cat > *)",
+      "Bash(node /tmp/ip-probe.cjs)",
+      "Bash(pnpm exec *)",
+      "Bash(pnpm test *)",
+      "Bash(git stash *)",
+      "Bash(git diff *)",
+      "Bash(git add *)",
+      "Bash(echo \"exit: $?\")"
+    ],
+    "additionalDirectories": [
+      "/private/tmp"
+    ]
+  }
+}

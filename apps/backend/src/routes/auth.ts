@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Router } from 'express';
 import type { Request, Response, IRouter } from 'express';
+import rateLimit, { type RateLimitRequestHandler } from 'express-rate-limit';
 import { Keypair } from '@stellar/stellar-sdk';
 import { db } from '../db/index.js';
 import { users, wallets } from '../db/schema.js';
@@ -8,12 +9,35 @@ import { eq } from 'drizzle-orm';
 import { createNonce, consumeNonce } from '../lib/nonce.js';
 import { signToken } from '../lib/jwt.js';
 import { validate } from '../middleware/validate.js';
-import { ChallengeSchema, VerifySchema, type ChallengeBody, type VerifyBody } from '../schemas/auth.schemas.js';
+import {
+  ChallengeSchema,
+  VerifySchema,
+  type ChallengeBody,
+  type VerifyBody,
+} from '../schemas/auth.schemas.js';
 
 export const authRouter: IRouter = Router();
 
+const rateLimitedResponse = { error: 'Too many requests' };
+
+export const challengeLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: rateLimitedResponse,
+});
+
+export const verifyLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 5,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: rateLimitedResponse,
+});
+
 // Step 1: client requests a challenge nonce for a wallet address
-authRouter.post('/challenge', validate(ChallengeSchema), (req: Request, res: Response) => {
+authRouter.post('/challenge', challengeLimiter, validate(ChallengeSchema), (req: Request, res: Response) => {
   const { walletAddress } = req.body as ChallengeBody;
 
   const nonce = createNonce(walletAddress);
@@ -23,7 +47,7 @@ authRouter.post('/challenge', validate(ChallengeSchema), (req: Request, res: Res
 });
 
 // Step 2: client signs the message and submits the signature
-authRouter.post('/verify', validate(VerifySchema), async (req: Request, res: Response) => {
+authRouter.post('/verify', verifyLimiter, validate(VerifySchema), async (req: Request, res: Response) => {
   const { walletAddress, signature, nonce } = req.body as VerifyBody;
 
   // Validate and consume nonce
