@@ -12,10 +12,7 @@ import { app } from './app.js';
 import { redis as appRedis } from './lib/redis.js';
 import { setSocketServer } from './lib/socket.js';
 import { setOnline, setOffline, refreshPresence } from './services/presence.js';
-import {
-  buildRpcFetcher,
-  runForever as runStellarListener,
-} from './services/stellarListener.js';
+import { buildRpcFetcher, runForever as runStellarListener } from './services/stellarListener.js';
 import { loadEnv } from './config.js';
 
 dotenv.config();
@@ -36,7 +33,7 @@ io.use(socketAuthMiddleware);
 io.on('connection', async (socket: AuthSocket) => {
   const userId = socket.auth!.userId;
   console.log('User connected:', userId, socket.id);
-  
+
   if (appRedis) {
     await setOnline(appRedis, userId, socket.id);
     const memberships = await db.query.conversationMembers.findMany({

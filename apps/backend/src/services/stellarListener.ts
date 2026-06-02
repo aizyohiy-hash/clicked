@@ -76,7 +76,6 @@ const consoleLogger = {
  * transfer with a message whose id matches the decoded memo bytes (if any).
  */
 async function defaultPersistEvent(event: StellarTransferEvent): Promise<void> {
-  let messageId: string | null = null;
   let conversationId: string | null = null;
   let senderId: string | null = null;
 
@@ -96,7 +95,6 @@ async function defaultPersistEvent(event: StellarTransferEvent): Promise<void> {
           .where(eq(messages.id, memo))
           .limit(1);
         if (existing) {
-          messageId = existing.id;
           conversationId = existing.conversationId;
           senderId = existing.senderId;
         }
@@ -175,10 +173,7 @@ export async function runForever(deps: StellarListenerDeps): Promise<void> {
       await wait(pollMs, deps.signal);
     } catch (err) {
       consecutiveFailures += 1;
-      const delay = Math.min(
-        backoffBase * Math.pow(2, consecutiveFailures - 1),
-        backoffMax,
-      );
+      const delay = Math.min(backoffBase * Math.pow(2, consecutiveFailures - 1), backoffMax);
       log.error('fetch failed; reconnecting after backoff', {
         attempt: consecutiveFailures,
         delayMs: delay,
@@ -220,10 +215,24 @@ export function buildRpcFetcher(opts: {
 }): StellarListenerDeps['fetchEvents'] {
   const server = new rpc.Server(opts.rpcUrl, { allowHttp: opts.rpcUrl.startsWith('http://') });
   const pageSize = opts.pageSize ?? 100;
+  type RpcEvent = {
+    txHash?: string;
+    ledger?: number;
+    value?: { from?: string; to?: string; amount?: string | number; memo?: string };
+    pagingToken?: string;
+  };
+  const eventServer = server as unknown as {
+    getEvents: (request: {
+      startLedger: undefined;
+      cursor: string | undefined;
+      filters: Array<{ type: 'contract'; contractIds: string[]; topics: string[][] }>;
+      limit: number;
+    }) => Promise<{ events?: RpcEvent[] }>;
+  };
 
   return async (cursor) => {
     const startLedger = cursor ? undefined : undefined; // resume on cursor only
-    const response = await (server as any).getEvents({
+    const response = await eventServer.getEvents({
       startLedger,
       cursor: cursor ?? undefined,
       filters: [
@@ -236,23 +245,25 @@ export function buildRpcFetcher(opts: {
       limit: pageSize,
     });
 
-    const events = (response?.events ?? []) as Array<{
-      txHash?: string;
-      ledger?: number;
-      value?: { from?: string; to?: string; amount?: string | number; memo?: string };
-      pagingToken?: string;
-    }>;
+    const events = response.events ?? [];
 
     return events
       .filter((e) => e.txHash && e.value?.from && e.value?.to && e.value?.amount != null)
-      .map((e) => ({
-        txHash: e.txHash as string,
-        ledger: e.ledger ?? 0,
-        from: e.value!.from as string,
-        to: e.value!.to as string,
-        amount: String(e.value!.amount),
-        memoHex: e.value?.memo,
-        cursor: e.pagingToken ?? '',
-      }));
+      .map((e) => {
+        const event: StellarTransferEvent = {
+          txHash: e.txHash as string,
+          ledger: e.ledger ?? 0,
+          from: e.value!.from as string,
+          to: e.value!.to as string,
+          amount: String(e.value!.amount),
+          cursor: e.pagingToken ?? '',
+        };
+
+        if (e.value?.memo !== undefined) {
+          event.memoHex = e.value.memo;
+        }
+
+        return event;
+      });
   };
 }

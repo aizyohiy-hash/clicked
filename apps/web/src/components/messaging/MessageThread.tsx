@@ -4,6 +4,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { ChatMessage } from "@/hooks/useMessageHistory";
 import type { Socket } from "socket.io-client";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Spinner } from "@/components/ui/Spinner";
 
 export interface MessageThreadProps {
   messages: ChatMessage[];
@@ -151,31 +153,39 @@ export function MessageThread({
       aria-relevant="additions"
       className="flex h-full flex-col gap-2 overflow-y-auto px-4 py-3"
     >
-      {/* Top indicators: spinner while loading, "no more messages" once we hit the start. */}
-      <div className="flex flex-col items-center gap-1 py-2 text-xs text-gray-500">
-        {loadingOlder ? (
-          <span
-            role="status"
-            aria-label="Loading older messages"
-            className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-700"
+      {messages.length === 0 && !loadingOlder && hasReachedStart ? (
+        <div className="flex flex-1 items-center justify-center px-4 py-3">
+          <EmptyState
+            icon="💬"
+            title="No messages yet"
+            description="Start the conversation by sending a message."
           />
-        ) : hasReachedStart ? (
-          <span>No more messages</span>
-        ) : null}
-      </div>
-
-      {messages.map((message) =>
-        renderMessage ? (
-          <div key={message.id}>{renderMessage(message)}</div>
-        ) : (
-          <DefaultMessageRow key={message.id} message={message} />
-        ),
-      )}
-
-      {typingUsers.size > 0 && (
-        <div aria-live="polite" aria-atomic="true" className="px-1 text-xs text-gray-500 italic">
-          {[...typingUsers].join(", ")} {typingUsers.size === 1 ? "is" : "are"} typing…
         </div>
+      ) : (
+        <>
+          {/* Top indicators: spinner while loading, "no more messages" once we hit the start. */}
+          <div className="flex flex-col items-center gap-1 py-2 text-xs text-gray-500">
+            {loadingOlder ? (
+              <Spinner size="sm" label="Loading older messages" />
+            ) : hasReachedStart && messages.length > 0 ? (
+              <span>No more messages</span>
+            ) : null}
+          </div>
+
+          {messages.map((message) =>
+            renderMessage ? (
+              <div key={message.id}>{renderMessage(message)}</div>
+            ) : (
+              <DefaultMessageRow key={message.id} message={message} />
+            ),
+          )}
+
+          {typingUsers.size > 0 && (
+            <div aria-live="polite" aria-atomic="true" className="px-1 text-xs text-gray-500 italic">
+              {[...typingUsers].join(", ")} {typingUsers.size === 1 ? "is" : "are"} typing…
+            </div>
+          )}
+        </>
       )}
     </div>
   );

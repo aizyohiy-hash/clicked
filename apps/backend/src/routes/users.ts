@@ -10,6 +10,48 @@ export const usersRouter: RouterType = Router();
 
 usersRouter.use(requireAuth);
 
+usersRouter.get('/me', async (req: AuthRequest, res) => {
+  const userId = req.auth!.userId;
+
+  try {
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, userId),
+      columns: {
+        id: true,
+        username: true,
+        avatarUrl: true,
+        createdAt: true,
+      },
+      with: {
+        wallets: {
+          columns: {
+            address: true,
+            isPrimary: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    res.json({
+      id: user.id,
+      username: user.username,
+      avatarUrl: user.avatarUrl,
+      wallets: user.wallets.map((w) => ({
+        address: w.address,
+        isPrimary: w.isPrimary,
+      })),
+      createdAt: user.createdAt,
+    });
+  } catch {
+    res.status(404).json({ error: 'User not found' });
+  }
+});
+
 usersRouter.get('/:id', async (req: AuthRequest, res) => {
   const id = req.params['id'] as string;
 
@@ -72,7 +114,9 @@ usersRouter.patch('/me', async (req: AuthRequest, res) => {
 
   if (username !== undefined) {
     if (typeof username !== 'string' || !/^[a-zA-Z0-9_]{3,30}$/.test(username)) {
-      res.status(400).json({ error: 'Username must be 3-30 alphanumeric characters and underscores only' });
+      res
+        .status(400)
+        .json({ error: 'Username must be 3-30 alphanumeric characters and underscores only' });
       return;
     }
 
@@ -103,8 +147,7 @@ usersRouter.patch('/me', async (req: AuthRequest, res) => {
     }
 
     res.json(updatedUser);
-  } catch (err) {
+  } catch {
     res.status(409).json({ error: 'Username conflict or database error' });
   }
 });
-

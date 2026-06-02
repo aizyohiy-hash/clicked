@@ -22,11 +22,7 @@ function presenceKey(userId: string): string {
  * Register a socket connection for a user. Adds the socketId to the
  * user's presence set and sets/refreshes the TTL.
  */
-export async function setOnline(
-  redis: Redis,
-  userId: string,
-  socketId: string,
-): Promise<void> {
+export async function setOnline(redis: Redis, userId: string, socketId: string): Promise<void> {
   const key = presenceKey(userId);
   await redis.sadd(key, socketId);
   await redis.expire(key, PRESENCE_TTL);
@@ -35,10 +31,7 @@ export async function setOnline(
 /**
  * Refresh the presence TTL (called on heartbeat).
  */
-export async function refreshPresence(
-  redis: Redis,
-  userId: string,
-): Promise<void> {
+export async function refreshPresence(redis: Redis, userId: string): Promise<void> {
   const key = presenceKey(userId);
   const exists = await redis.exists(key);
   if (exists) {
@@ -50,11 +43,7 @@ export async function refreshPresence(
  * Remove a socket connection from the user's presence set.
  * Returns true if the user has gone fully offline (no remaining sockets).
  */
-export async function setOffline(
-  redis: Redis,
-  userId: string,
-  socketId: string,
-): Promise<boolean> {
+export async function setOffline(redis: Redis, userId: string, socketId: string): Promise<boolean> {
   const key = presenceKey(userId);
   await redis.srem(key, socketId);
   const remaining = await redis.scard(key);
@@ -68,10 +57,7 @@ export async function setOffline(
 /**
  * Check if a user is currently online.
  */
-export async function isOnline(
-  redis: Redis,
-  userId: string,
-): Promise<boolean> {
+export async function isOnline(redis: Redis, userId: string): Promise<boolean> {
   const key = presenceKey(userId);
   const count = await redis.scard(key);
   return count > 0;

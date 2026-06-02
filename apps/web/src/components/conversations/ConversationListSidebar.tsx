@@ -5,6 +5,8 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { API_BASE_URL } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { SkeletonLoader } from "@/components/ui/SkeletonLoader";
 
 interface Wallet {
   address?: string;
@@ -123,9 +125,11 @@ export function ConversationListSidebar() {
         {isLoading ? <ConversationSkeleton /> : null}
         {!isLoading && error ? <p className="p-4 text-sm text-red-300">{error}</p> : null}
         {!isLoading && !error && conversations.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-[var(--foreground)]/50">
-            No conversations yet.
-          </div>
+          <EmptyState
+            icon="💬"
+            title="No conversations yet."
+            description="Start a new chat to see messages here."
+          />
         ) : null}
 
         <div className="flex flex-col gap-2">
@@ -167,10 +171,7 @@ function ConversationSkeleton() {
   return (
     <div className="flex flex-col gap-2" aria-label="Loading conversations">
       {Array.from({ length: 5 }).map((_, index) => (
-        <div key={index} className="animate-pulse rounded-2xl border border-[var(--border)] p-4">
-          <div className="h-4 w-2/3 rounded bg-[var(--muted)]" />
-          <div className="mt-3 h-3 w-full rounded bg-[var(--muted)]/70" />
-        </div>
+        <SkeletonLoader key={index} variant="card" />
       ))}
     </div>
   );

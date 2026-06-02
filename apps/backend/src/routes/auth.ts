@@ -8,7 +8,12 @@ import { eq } from 'drizzle-orm';
 import { createNonce, consumeNonce } from '../lib/nonce.js';
 import { signToken } from '../lib/jwt.js';
 import { validate } from '../middleware/validate.js';
-import { ChallengeSchema, VerifySchema, type ChallengeBody, type VerifyBody } from '../schemas/auth.schemas.js';
+import {
+  ChallengeSchema,
+  VerifySchema,
+  type ChallengeBody,
+  type VerifyBody,
+} from '../schemas/auth.schemas.js';
 
 export const authRouter: IRouter = Router();
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const MAX_QUERY_LENGTH = 120;
@@ -107,7 +108,11 @@ export function NewConversationModal({
           {loading ? <p className="text-sm text-slate-300">Searching...</p> : null}
           {error ? <p className="text-sm text-rose-300">{error}</p> : null}
           {!loading && !error && query.trim() && results.length === 0 ? (
-            <p className="text-sm text-slate-400">No users found.</p>
+            <EmptyState
+              icon="🔎"
+              title="No users found"
+              description="Try a different search term."
+            />
           ) : null}
           {results.map((user) => (
             <button

@@ -39,8 +39,41 @@ const MOCK_USER = {
   ],
 };
 
+const MOCK_CREATED_AT = new Date('2026-05-31T12:00:00.000Z');
+
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe('GET /users/me', () => {
+  it('returns 401 when no Authorization header is provided', async () => {
+    const res = await request(app).get('/users/me');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns the authenticated user profile with wallets and createdAt', async () => {
+    vi.mocked(db.query.users.findFirst).mockResolvedValue({
+      id: 'auth-user-id',
+      username: 'alice',
+      avatarUrl: null,
+      wallets: MOCK_USER.wallets,
+      createdAt: MOCK_CREATED_AT,
+    } as never);
+
+    const res = await request(app).get('/users/me').set('Authorization', AUTH_HEADER);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      id: 'auth-user-id',
+      username: 'alice',
+      avatarUrl: null,
+      wallets: [
+        { address: 'GABCDEFG', isPrimary: true },
+        { address: 'GHIJKLMN', isPrimary: false },
+      ],
+      createdAt: MOCK_CREATED_AT.toISOString(),
+    });
+  });
 });
 
 describe('GET /users/:id', () => {
@@ -66,31 +99,27 @@ describe('GET /users/:id', () => {
   it('returns 404 when user does not exist', async () => {
     vi.mocked(db.query.users.findFirst).mockResolvedValue(undefined);
 
-    const res = await request(app)
-      .get('/users/unknown-uuid')
-      .set('Authorization', AUTH_HEADER);
+    const res = await request(app).get('/users/unknown-uuid').set('Authorization', AUTH_HEADER);
 
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: 'User not found' });
   });
 
   it('returns 404 for a malformed (non-UUID) id', async () => {
-    vi.mocked(db.query.users.findFirst).mockRejectedValue(new Error('invalid input syntax for type uuid'));
+    vi.mocked(db.query.users.findFirst).mockRejectedValue(
+      new Error('invalid input syntax for type uuid'),
+    );
 
-    const res = await request(app)
-      .get('/users/not-a-valid-uuid')
-      .set('Authorization', AUTH_HEADER);
+    const res = await request(app).get('/users/not-a-valid-uuid').set('Authorization', AUTH_HEADER);
 
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: 'User not found' });
   });
 
   it('returns the user profile with wallets on success', async () => {
-    vi.mocked(db.query.users.findFirst).mockResolvedValue(MOCK_USER as any); // eslint-disable-line
+    vi.mocked(db.query.users.findFirst).mockResolvedValue(MOCK_USER as never);
 
-    const res = await request(app)
-      .get('/users/user-uuid-123')
-      .set('Authorization', AUTH_HEADER);
+    const res = await request(app).get('/users/user-uuid-123').set('Authorization', AUTH_HEADER);
 
     expect(res.status).toBe(200);
     expect(res.body.id).toBe(MOCK_USER.id);
@@ -113,11 +142,9 @@ describe('GET /users/:id', () => {
         createdAt: new Date(),
       })),
     };
-    vi.mocked(db.query.users.findFirst).mockResolvedValue(userWithInternals as any); // eslint-disable-line
+    vi.mocked(db.query.users.findFirst).mockResolvedValue(userWithInternals as never);
 
-    const res = await request(app)
-      .get('/users/user-uuid-123')
-      .set('Authorization', AUTH_HEADER);
+    const res = await request(app).get('/users/user-uuid-123').set('Authorization', AUTH_HEADER);
 
     expect(res.status).toBe(200);
     // Explicit serialization in handler ensures internal fields never reach the response
@@ -146,7 +173,10 @@ describe('PATCH /users/me', () => {
   });
 
   it('returns 409 for duplicate username', async () => {
-    vi.mocked(db.query.users.findFirst).mockResolvedValue({ id: 'another-user-id', username: 'conflict' } as any);
+    vi.mocked(db.query.users.findFirst).mockResolvedValue({
+      id: 'another-user-id',
+      username: 'conflict',
+    } as never);
 
     const res = await request(app)
       .patch('/users/me')
@@ -159,11 +189,13 @@ describe('PATCH /users/me', () => {
 
   it('returns 200 and updated user on success', async () => {
     vi.mocked(db.query.users.findFirst).mockResolvedValue(undefined); // no conflict
-    
-    const mockReturning = vi.fn().mockResolvedValue([{ id: 'auth-user-id', username: 'new_name', avatarUrl: 'new_url' }]);
+
+    const mockReturning = vi
+      .fn()
+      .mockResolvedValue([{ id: 'auth-user-id', username: 'new_name', avatarUrl: 'new_url' }]);
     const mockWhere = vi.fn(() => ({ returning: mockReturning }));
     const mockSet = vi.fn(() => ({ where: mockWhere }));
-    vi.mocked(db.update).mockReturnValue({ set: mockSet } as any);
+    vi.mocked(db.update).mockReturnValue({ set: mockSet } as never);
 
     const res = await request(app)
       .patch('/users/me')
@@ -175,4 +207,3 @@ describe('PATCH /users/me', () => {
     expect(res.body.avatarUrl).toBe('new_url');
   });
 });
-
