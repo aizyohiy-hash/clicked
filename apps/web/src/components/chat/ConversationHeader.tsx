@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { Avatar } from "@/components/ui/Avatar";
 
 interface Member {
   user?: {
@@ -84,18 +85,7 @@ export function ConversationHeader({
         {/* Avatar (DM only) */}
         {type === "dm" && (
           <div className="relative shrink-0">
-            {avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={avatarUrl}
-                alt={title}
-                className="h-9 w-9 rounded-full object-cover"
-              />
-            ) : (
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--accent)]/20 text-sm font-semibold uppercase text-[var(--accent)]">
-                {title.slice(0, 2)}
-              </div>
-            )}
+            <Avatar src={avatarUrl ?? undefined} fallback={title} size="md" />
             {/* Online status dot */}
             <span
               aria-label={isOnline ? "Online" : "Offline"}

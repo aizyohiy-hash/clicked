@@ -34,6 +34,12 @@ vi.mock('@stellar/stellar-sdk', () => ({
 // ── Import app after mocks are registered ─────────────────────────────────
 
 const { app } = await import('../app.js');
+const { challengeLimiter, verifyLimiter } = await import('../routes/auth.js');
+
+function resetRateLimiters() {
+  challengeLimiter.resetKey('127.0.0.1');
+  verifyLimiter.resetKey('127.0.0.1');
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -51,7 +57,10 @@ function setupInsert(userId = 'new-user-id') {
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 describe('POST /auth/challenge', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetRateLimiters();
+  });
 
   it('returns 200 with message and nonce for valid walletAddress', async () => {
     const res = await request(app).post('/auth/challenge').send({ walletAddress: WALLET });
@@ -83,7 +92,10 @@ describe('POST /auth/challenge', () => {
 });
 
 describe('POST /auth/verify', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetRateLimiters();
+  });
 
   it('returns 200 with JWT token for valid new-user flow', async () => {
     mockConsumeNonce.mockReturnValue(true);
@@ -163,5 +175,73 @@ describe('POST /auth/verify', () => {
 
     expect(res.status).toBe(401);
     expect(res.body).toHaveProperty('error');
+  });
+});
+
+describe('Auth rate limiting', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetRateLimiters();
+    mockConsumeNonce.mockReturnValue(true);
+    mockVerify.mockReturnValue(true);
+    mockFindFirst.mockResolvedValue({ userId: 'existing-user-id', address: WALLET });
+  });
+
+  it('allows up to 10 /auth/challenge requests per minute, blocks the 11th with 429', async () => {
+    for (let i = 0; i < 10; i++) {
+      const res = await request(app).post('/auth/challenge').send({ walletAddress: WALLET });
+      expect(res.status).toBe(200);
+    }
+
+    const blocked = await request(app).post('/auth/challenge').send({ walletAddress: WALLET });
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers['retry-after']).toBeDefined();
+  });
+
+  it('allows up to 5 /auth/verify requests per minute, blocks the 6th with 429', async () => {
+    for (let i = 0; i < 5; i++) {
+      const res = await request(app)
+        .post('/auth/verify')
+        .send({ walletAddress: WALLET, signature: SIGNATURE, nonce: NONCE });
+      expect(res.status).toBe(200);
+    }
+
+    const blocked = await request(app)
+      .post('/auth/verify')
+      .send({ walletAddress: WALLET, signature: SIGNATURE, nonce: NONCE });
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers['retry-after']).toBeDefined();
+  });
+
+  it('challenge and verify limiters are independent', async () => {
+    // Exhaust verify limit
+    for (let i = 0; i < 5; i++) {
+      await request(app)
+        .post('/auth/verify')
+        .send({ walletAddress: WALLET, signature: SIGNATURE, nonce: NONCE });
+    }
+    const verifyBlocked = await request(app)
+      .post('/auth/verify')
+      .send({ walletAddress: WALLET, signature: SIGNATURE, nonce: NONCE });
+    expect(verifyBlocked.status).toBe(429);
+
+    // Challenge limit should still allow requests
+    const challengeRes = await request(app).post('/auth/challenge').send({ walletAddress: WALLET });
+    expect(challengeRes.status).toBe(200);
+  });
+
+  it('does not affect authenticated routes (/me returns its normal status under heavy load)', async () => {
+    // Hammer /me well past the auth limits — it must not return 429
+    for (let i = 0; i < 20; i++) {
+      const res = await request(app).get('/me');
+      expect(res.status).not.toBe(429);
+    }
+  });
+
+  it('does not affect the /health endpoint under heavy load', async () => {
+    for (let i = 0; i < 20; i++) {
+      const res = await request(app).get('/health');
+      expect(res.status).not.toBe(429);
+    }
   });
 });

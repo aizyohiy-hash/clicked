@@ -109,9 +109,38 @@ conversationsRouter.get('/', async (req: AuthRequest, res) => {
 
   const countMap = new Map(countRows.map((r) => [r.conversationId, r.count]));
 
+  // Unread count per conversation: messages after the member's lastReadMessageId.
+  // Returns 0 when lastReadMessageId is NULL (no read position established yet).
+  const unreadRows: Array<{ conversationId: string; unreadCount: number }> =
+    conversationIds.length > 0
+      ? [
+          ...(await db.execute<{ conversationId: string; unreadCount: number }>(sql`
+            SELECT
+              cm.conversation_id AS "conversationId",
+              CASE
+                WHEN cm.last_read_message_id IS NULL THEN 0
+                ELSE (
+                  SELECT COUNT(*)::int
+                  FROM messages m2
+                  WHERE m2.conversation_id = cm.conversation_id
+                    AND m2.deleted_at IS NULL
+                    AND m2.created_at > lrm.created_at
+                )
+              END AS "unreadCount"
+            FROM conversation_members cm
+            LEFT JOIN messages lrm ON lrm.id = cm.last_read_message_id
+            WHERE cm.user_id = ${userId}::uuid
+              AND cm.conversation_id = ANY(ARRAY[${sql.join(conversationIds.map((id) => sql`${id}::uuid`), sql`, `)}])
+          `)),
+        ]
+      : [];
+
+  const unreadMap = new Map(unreadRows.map((r) => [r.conversationId, r.unreadCount]));
+
   const result = memberships.map((m) => ({
     ...m.conversation,
     messageCount: countMap.get(m.conversationId) ?? 0,
+    unreadCount: unreadMap.get(m.conversationId) ?? 0,
   }));
 
   // Cache write with 30-second TTL
