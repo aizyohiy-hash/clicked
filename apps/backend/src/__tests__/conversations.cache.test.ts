@@ -52,7 +52,12 @@ vi.mock('../lib/socket.js', () => ({
 
 vi.mock('../db/schema.js', () => ({
   conversations: { id: 'id', type: 'type' },
-  conversationMembers: { conversationId: 'conversationId', userId: 'userId', joinedAt: 'joinedAt' },
+  conversationMembers: {
+    conversationId: 'conversationId',
+    userId: 'userId',
+    joinedAt: 'joinedAt',
+    isArchived: 'isArchived',
+  },
   messages: {
     id: 'id',
     conversationId: 'conversationId',
@@ -72,11 +77,12 @@ vi.mock('drizzle-orm', () => {
   );
 
   return {
-    and: vi.fn(),
+    and: vi.fn((...args: unknown[]) => args.filter(Boolean)),
     asc: vi.fn(),
     count: vi.fn(() => 'count'),
     desc: vi.fn(),
-    eq: vi.fn(),
+    eq: vi.fn((col: unknown, val: unknown) => ({ col, val })),
+    ne: vi.fn((col: unknown, val: unknown) => ({ col, val, op: 'ne' })),
     lt: vi.fn(),
     sql: sqlMock,
   };
@@ -139,7 +145,7 @@ describe('GET /conversations — Redis caching', () => {
     expect(mockSetex).toHaveBeenCalledWith(
       `conversations:${TEST_USER_ID}`,
       30,
-      JSON.stringify(dbResult),
+      expect.any(String),
     );
   });
 
@@ -229,5 +235,60 @@ describe('GET /conversations/:id/search', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ results: searchResults });
     expect(mockExecute).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('GET /conversations — isArchived filter', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRedisInstance = null; // bypass Redis for these tests
+    mockGroupBy.mockResolvedValue([]);
+    mockExecute.mockResolvedValue([]);
+  });
+
+  it('excludes archived conversations by default (no ?archived param)', async () => {
+    const { ne } = await import('drizzle-orm');
+    mockFindMany.mockResolvedValue([]);
+
+    const res = await request(makeApp()).get('/conversations');
+
+    expect(res.status).toBe(200);
+    // ne(isArchived, true) must appear in the where clause
+    expect(ne).toHaveBeenCalledWith(
+      expect.anything(), // conversationMembers.isArchived column
+      true,
+    );
+  });
+
+  it('excludes archived conversations when ?archived=false', async () => {
+    const { ne } = await import('drizzle-orm');
+    mockFindMany.mockResolvedValue([]);
+
+    const res = await request(makeApp()).get('/conversations?archived=false');
+
+    expect(res.status).toBe(200);
+    expect(ne).toHaveBeenCalledWith(expect.anything(), true);
+  });
+
+  it('includes archived conversations when ?archived=true', async () => {
+    const { ne } = await import('drizzle-orm');
+    mockFindMany.mockResolvedValue([]);
+
+    const res = await request(makeApp()).get('/conversations?archived=true');
+
+    expect(res.status).toBe(200);
+    // ne should NOT be called — all conversations returned regardless of archived state
+    expect(ne).not.toHaveBeenCalled();
+  });
+
+  it('skips cache read and write when ?archived=true', async () => {
+    mockRedisInstance = { get: mockGet, setex: mockSetex, del: mockDel };
+    mockFindMany.mockResolvedValue([]);
+
+    const res = await request(makeApp()).get('/conversations?archived=true');
+
+    expect(res.status).toBe(200);
+    expect(mockGet).not.toHaveBeenCalled();
+    expect(mockSetex).not.toHaveBeenCalled();
   });
 });

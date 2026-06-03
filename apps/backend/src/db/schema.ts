@@ -41,6 +41,8 @@ export const conversationMembers = pgTable('conversation_members', {
   lastReadMessageId: uuid('last_read_message_id').references(() => messages.id, {
     onDelete: 'set null',
   }),
+  isMuted: boolean('is_muted').notNull().default(false),
+  isArchived: boolean('is_archived').notNull().default(false),
   joinedAt: timestamp('joined_at').notNull().defaultNow(),
 });
 

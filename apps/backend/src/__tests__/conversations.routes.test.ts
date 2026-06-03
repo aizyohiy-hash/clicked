@@ -57,9 +57,10 @@ vi.mock('../db/schema.js', () => ({
 }));
 
 vi.mock('drizzle-orm', () => ({
-  and: vi.fn((...args: unknown[]) => args),
+  and: vi.fn((...args: unknown[]) => args.filter(Boolean)),
   asc: vi.fn(),
   eq: vi.fn((col: unknown, val: unknown) => ({ col, val })),
+  ne: vi.fn((col: unknown, val: unknown) => ({ col, val, op: 'ne' })),
   desc: vi.fn(),
   lt: vi.fn(),
   sql: vi.fn(),
