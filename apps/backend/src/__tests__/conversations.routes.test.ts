@@ -18,6 +18,10 @@ const mockValues = vi.fn(() => ({ returning: mockReturning }));
 const mockInsert = vi.fn(() => ({ values: mockValues }));
 const mockEmit = vi.fn();
 const mockTo = vi.fn(() => ({ emit: mockEmit }));
+const mockUpdateReturning = vi.fn();
+const mockUpdateWhere = vi.fn(() => ({ returning: mockUpdateReturning }));
+const mockUpdateSet = vi.fn(() => ({ where: mockUpdateWhere }));
+const mockUpdate = vi.fn(() => ({ set: mockUpdateSet }));
 
 vi.mock('../lib/socket.js', () => ({
   getSocketServer: () => ({ to: mockTo }),
@@ -39,6 +43,7 @@ vi.mock('../db/index.js', () => ({
     },
     delete: mockDelete,
     insert: mockInsert,
+    update: mockUpdate,
   },
 }));
 
@@ -286,6 +291,114 @@ describe('POST /conversations/:id/members', () => {
       conversationId: 'conv-1',
       userId: 'user-2',
       joinedAt: joinedAt.toISOString(),
+    });
+  });
+});
+
+describe('PATCH /conversations/:id', () => {
+  it('returns 400 for DM conversations', async () => {
+    mockFindConversation.mockResolvedValue({ id: 'conv-dm', type: 'dm' });
+
+    const res = await request(makeApp())
+      .patch('/conversations/conv-dm')
+      .send({ name: 'New Name' });
+
+    expect(res.status).toBe(400);
+    expect(mockUpdateSet).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when the caller is not a member', async () => {
+    mockFindConversation.mockResolvedValue({ id: 'conv-1', type: 'group' });
+    mockFindMember.mockResolvedValue(undefined);
+
+    const res = await request(makeApp())
+      .patch('/conversations/conv-1')
+      .send({ name: 'New Name' });
+
+    expect(res.status).toBe(403);
+    expect(mockUpdateSet).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when neither name nor avatarUrl is provided', async () => {
+    const res = await request(makeApp())
+      .patch('/conversations/conv-1')
+      .send({});
+
+    expect(res.status).toBe(400);
+  });
+
+  it('updates the conversation name and broadcasts conversation_updated', async () => {
+    const updatedConv = {
+      id: 'conv-1',
+      type: 'group',
+      name: 'New Name',
+      avatarUrl: null,
+      createdAt: new Date('2026-05-31T10:00:00.000Z'),
+    };
+
+    mockFindConversation.mockResolvedValue({ id: 'conv-1', type: 'group' });
+    mockFindMember.mockResolvedValue({ id: 'member-1' });
+    mockUpdateReturning.mockResolvedValue([updatedConv]);
+    mockFindMany.mockResolvedValue([{ userId: 'user-1' }, { userId: 'user-2' }]);
+
+    const res = await request(makeApp())
+      .patch('/conversations/conv-1')
+      .send({ name: 'New Name' });
+
+    expect(res.status).toBe(200);
+    expect(mockUpdate).toHaveBeenCalled();
+    expect(mockUpdateSet).toHaveBeenCalled();
+    expect(mockUpdateWhere).toHaveBeenCalled();
+    expect(mockTo).toHaveBeenCalledWith('conv-1');
+    expect(mockEmit).toHaveBeenCalledWith('conversation_updated', {
+      id: updatedConv.id,
+      type: updatedConv.type,
+      name: updatedConv.name,
+      avatarUrl: updatedConv.avatarUrl,
+      createdAt: updatedConv.createdAt,
+    });
+    expect(res.body).toEqual({
+      id: updatedConv.id,
+      type: updatedConv.type,
+      name: updatedConv.name,
+      avatarUrl: updatedConv.avatarUrl,
+      createdAt: updatedConv.createdAt.toISOString(),
+    });
+  });
+
+  it('updates the conversation avatarUrl and broadcasts conversation_updated', async () => {
+    const updatedConv = {
+      id: 'conv-1',
+      type: 'group',
+      name: 'General',
+      avatarUrl: 'https://example.com/avatar.png',
+      createdAt: new Date('2026-05-31T10:00:00.000Z'),
+    };
+
+    mockFindConversation.mockResolvedValue({ id: 'conv-1', type: 'group' });
+    mockFindMember.mockResolvedValue({ id: 'member-1' });
+    mockUpdateReturning.mockResolvedValue([updatedConv]);
+    mockFindMany.mockResolvedValue([{ userId: 'user-1' }, { userId: 'user-2' }]);
+
+    const res = await request(makeApp())
+      .patch('/conversations/conv-1')
+      .send({ avatarUrl: 'https://example.com/avatar.png' });
+
+    expect(res.status).toBe(200);
+    expect(mockTo).toHaveBeenCalledWith('conv-1');
+    expect(mockEmit).toHaveBeenCalledWith('conversation_updated', {
+      id: updatedConv.id,
+      type: updatedConv.type,
+      name: updatedConv.name,
+      avatarUrl: updatedConv.avatarUrl,
+      createdAt: updatedConv.createdAt,
+    });
+    expect(res.body).toEqual({
+      id: updatedConv.id,
+      type: updatedConv.type,
+      name: updatedConv.name,
+      avatarUrl: updatedConv.avatarUrl,
+      createdAt: updatedConv.createdAt.toISOString(),
     });
   });
 });

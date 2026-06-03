@@ -322,6 +322,97 @@ conversationsRouter.post('/:id/members', async (req: AuthRequest, res) => {
   }
 });
 
+// PATCH /conversations/:id — Update group conversation name/avatar. Only members can update.
+conversationsRouter.patch('/:id', async (req: AuthRequest, res) => {
+  const userId = req.auth!.userId;
+  const conversationId = req.params['id'] as string | undefined;
+
+  if (!conversationId) {
+    res.status(400).json({ error: 'Conversation id is required' });
+    return;
+  }
+
+  const { name, avatarUrl } = req.body as { name?: string; avatarUrl?: string };
+
+  if (name === undefined && avatarUrl === undefined) {
+    res.status(400).json({ error: 'At least one of name or avatarUrl must be provided' });
+    return;
+  }
+
+  if (name !== undefined && typeof name !== 'string') {
+    res.status(400).json({ error: 'name must be a string' });
+    return;
+  }
+
+  if (avatarUrl !== undefined && typeof avatarUrl !== 'string') {
+    res.status(400).json({ error: 'avatarUrl must be a string' });
+    return;
+  }
+
+  const conversation = await db.query.conversations.findFirst({
+    where: eq(conversations.id, conversationId),
+    columns: { id: true, type: true },
+  });
+
+  if (!conversation) {
+    res.status(404).json({ error: 'Conversation not found' });
+    return;
+  }
+
+  if (conversation.type === 'dm') {
+    res.status(400).json({ error: 'DM conversations cannot be updated' });
+    return;
+  }
+
+  const membership = await db.query.conversationMembers.findFirst({
+    where: and(
+      eq(conversationMembers.conversationId, conversationId),
+      eq(conversationMembers.userId, userId),
+    ),
+  });
+
+  if (!membership) {
+    res.status(403).json({ error: 'Not a member of this conversation' });
+    return;
+  }
+
+  const updateData: { name?: string; avatarUrl?: string } = {};
+  if (name !== undefined) updateData.name = name;
+  if (avatarUrl !== undefined) updateData.avatarUrl = avatarUrl;
+
+  try {
+    const [updated] = await db
+      .update(conversations)
+      .set(updateData)
+      .where(eq(conversations.id, conversationId))
+      .returning();
+
+    if (!updated) {
+      res.status(500).json({ error: 'Failed to update conversation' });
+      return;
+    }
+
+    const members = await db.query.conversationMembers.findMany({
+      where: eq(conversationMembers.conversationId, conversationId),
+      columns: { userId: true },
+    });
+
+    await invalidateConversationCaches(members.map((member) => member.userId));
+
+    getSocketServer()?.to(conversationId).emit('conversation_updated', {
+      id: updated.id,
+      type: updated.type,
+      name: updated.name,
+      avatarUrl: updated.avatarUrl,
+      createdAt: updated.createdAt,
+    });
+
+    res.json(updated);
+  } catch {
+    res.status(500).json({ error: 'Failed to update conversation' });
+  }
+});
+
 // #14 — GET /conversations/:id/messages
 // Cursor-based pagination via ?before=<messageId>&limit=<n> (max 50).
 // Returns messages in ascending order with a `nextCursor` field.

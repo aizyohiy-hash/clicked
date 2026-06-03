@@ -27,6 +27,7 @@ export const conversations = pgTable('conversations', {
   id: uuid('id').primaryKey().defaultRandom(),
   type: conversationTypeEnum('type').notNull().default('dm'),
   name: text('name'),
+  avatarUrl: text('avatar_url'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
