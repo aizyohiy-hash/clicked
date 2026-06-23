@@ -48,6 +48,7 @@ io.on('connection', async (socket: AuthSocket) => {
     await setOnline(appRedis, userId, socket.id);
     for (const m of memberships) {
       io.to(m.conversationId).emit('user_online', { userId });
+      io.to(m.conversationId).emit('presence_update', { userId, online: true });
     }
   }
 
@@ -70,6 +71,7 @@ io.on('connection', async (socket: AuthSocket) => {
         });
         for (const m of memberships) {
           io.to(m.conversationId).emit('user_offline', { userId });
+          io.to(m.conversationId).emit('presence_update', { userId, online: false });
         }
       }
     }

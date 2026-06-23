@@ -47,7 +47,7 @@ interface AvatarProps {
   size: Size;
 }
 
-export function Avatar({ src, fallback, size }: AvatarProps) {
+export function Avatar({ src, fallback, size, online }: AvatarProps & { online?: boolean }) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
 
   const initials = useMemo(() => getInitials(fallback), [fallback]);
@@ -65,25 +65,34 @@ export function Avatar({ src, fallback, size }: AvatarProps) {
 
   return (
     <div
-      className="relative inline-flex shrink-0 overflow-hidden rounded-full bg-[var(--border)]"
+      className="relative inline-flex shrink-0"
       style={style}
       aria-label={ariaLabel}
     >
-      {showImage ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={src}
-          alt={ariaLabel}
-          className="h-full w-full object-cover"
-          onError={() => setFailedSrc(src ?? null)}
-        />
-      ) : (
+      <div className="h-full w-full overflow-hidden rounded-full bg-[var(--border)] flex">
+        {showImage ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={src}
+            alt={ariaLabel}
+            className="h-full w-full object-cover"
+            onError={() => setFailedSrc(src ?? null)}
+          />
+        ) : (
+          <span
+            className="flex h-full w-full items-center justify-center font-semibold uppercase text-white"
+            style={{ backgroundColor }}
+          >
+            {initials}
+          </span>
+        )}
+      </div>
+      {online && (
         <span
-          className="flex h-full w-full items-center justify-center font-semibold uppercase text-white"
-          style={{ backgroundColor }}
-        >
-          {initials}
-        </span>
+          data-testid="online-indicator"
+          className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-[#4CAF50]"
+          aria-label="Online"
+        />
       )}
     </div>
   );

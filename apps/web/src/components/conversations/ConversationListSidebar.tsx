@@ -8,6 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSocket } from "@/hooks/useSocket";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonLoader } from "@/components/ui/SkeletonLoader";
+import { Avatar } from "@/components/ui/Avatar";
 
 interface Wallet {
   address?: string;
@@ -18,6 +19,7 @@ interface Member {
   user?: {
     id?: string;
     username?: string | null;
+    avatarUrl?: string | null;
     wallets?: Wallet[];
   };
 }
@@ -71,6 +73,14 @@ function conversationTitle(conversation: Conversation, walletAddress?: string) {
   return peer?.address ?? "Direct message";
 }
 
+function getPeerUser(conversation: Conversation, currentWalletAddress?: string) {
+  if (conversation.type !== "dm") return null;
+  const peerMember = conversation.members?.find((m) =>
+    m.user?.wallets?.some((w) => w.address && w.address !== currentWalletAddress)
+  );
+  return peerMember?.user ?? null;
+}
+
 function UnreadBadge({ count }: { count: number }) {
   if (count <= 0) return null;
   return (
@@ -88,6 +98,9 @@ export function ConversationListSidebar() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [onlineUsers, setOnlineUsers] = useState<Map<string, boolean>>(new Map());
+  const offlineTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
   // unreadCounts: initialized from API's unreadCount field, updated by socket events
   const [unreadCounts, setUnreadCounts] = useState<Map<string, number>>(new Map());
@@ -149,6 +162,102 @@ export function ConversationListSidebar() {
       cancelled = true;
     };
   }, [token]);
+
+  // Load initial presence for DM conversations
+  useEffect(() => {
+    if (!token || conversations.length === 0) return;
+
+    const dmConversations = conversations.filter((c) => c.type === "dm");
+    dmConversations.forEach(async (conv) => {
+      const peer = getPeerUser(conv, user?.walletAddress);
+      const peerUserId = peer?.id;
+      if (!peerUserId) return;
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/users/${peerUserId}/presence`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (response.ok) {
+          const data = (await response.json()) as { online: boolean };
+          setOnlineUsers((prev) => {
+            const next = new Map(prev);
+            next.set(peerUserId, data.online);
+            return next;
+          });
+        }
+      } catch (err) {
+        console.error("Failed to fetch presence for", peerUserId, err);
+      }
+    });
+  }, [conversations, token, user?.walletAddress]);
+
+  // Clean up all offline timers when component unmounts
+  useEffect(() => {
+    return () => {
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      offlineTimers.current.forEach((timer) => clearTimeout(timer));
+    };
+  }, []);
+
+  // Presence socket listeners
+  useEffect(() => {
+    if (!socket) return;
+
+    function handleOnline(userId: string) {
+      const existingTimer = offlineTimers.current.get(userId);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        offlineTimers.current.delete(userId);
+      }
+      setOnlineUsers((prev) => {
+        const next = new Map(prev);
+        next.set(userId, true);
+        return next;
+      });
+    }
+
+    function handleOffline(userId: string) {
+      const existingTimer = offlineTimers.current.get(userId);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+      }
+      const timer = setTimeout(() => {
+        setOnlineUsers((prev) => {
+          const next = new Map(prev);
+          next.set(userId, false);
+          return next;
+        });
+        offlineTimers.current.delete(userId);
+      }, 4500);
+      offlineTimers.current.set(userId, timer);
+    }
+
+    function onUserOnline(data: { userId: string }) {
+      handleOnline(data.userId);
+    }
+
+    function onUserOffline(data: { userId: string }) {
+      handleOffline(data.userId);
+    }
+
+    function onPresenceUpdate(data: { userId: string; online: boolean }) {
+      if (data.online) {
+        handleOnline(data.userId);
+      } else {
+        handleOffline(data.userId);
+      }
+    }
+
+    socket.on("user_online", onUserOnline);
+    socket.on("user_offline", onUserOffline);
+    socket.on("presence_update", onPresenceUpdate);
+
+    return () => {
+      socket.off("user_online", onUserOnline);
+      socket.off("user_offline", onUserOffline);
+      socket.off("presence_update", onPresenceUpdate);
+    };
+  }, [socket]);
 
   // Handle new_message events: increment unread for background conversations,
   // emit message_read immediately for the active conversation.
@@ -221,30 +330,51 @@ export function ConversationListSidebar() {
             const isSelected = selectedId === conversation.id;
             const unread = unreadCounts.get(conversation.id) ?? 0;
 
+            const title = conversationTitle(conversation, user?.walletAddress);
+            const peer = getPeerUser(conversation, user?.walletAddress);
+            const avatarUrl = peer?.avatarUrl ?? null;
+            const isOnline = peer ? onlineUsers.get(peer.id) ?? false : false;
+            const memberCount = conversation.members?.length ?? 0;
+
             return (
               <Link
                 key={conversation.id}
                 href={`/app/conversations/${conversation.id}`}
-                className={`rounded-2xl border p-4 transition-colors ${
+                className={`flex gap-3 rounded-2xl border p-4 transition-colors ${
                   isSelected
                     ? "border-accent bg-(--accent)/15"
                     : "border-transparent hover:border-border hover:bg-(--background)/60"
                 }`}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <h3 className="truncate text-sm font-semibold">
-                    {conversationTitle(conversation, user?.walletAddress)}
-                  </h3>
-                  <div className="flex shrink-0 flex-col items-end gap-1">
-                    <span className="text-xs text-(--foreground)/35">
-                      {relativeTime(lastMessage?.createdAt ?? conversation.createdAt)}
-                    </span>
-                    <UnreadBadge count={unread} />
+                <Avatar
+                  src={avatarUrl ?? undefined}
+                  fallback={title}
+                  size="md"
+                  online={conversation.type === "dm" && isOnline}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="truncate text-sm font-semibold">
+                        {title}
+                      </h3>
+                      {conversation.type === "group" && (
+                        <span className="text-xs text-(--foreground)/45">
+                          {memberCount} member{memberCount !== 1 ? "s" : ""}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      <span className="text-xs text-(--foreground)/35">
+                        {relativeTime(lastMessage?.createdAt ?? conversation.createdAt)}
+                      </span>
+                      <UnreadBadge count={unread} />
+                    </div>
                   </div>
+                  <p className="mt-1 truncate text-sm text-(--foreground)/45">
+                    {lastMessage ? truncate(lastMessage.content, 40) : "No messages yet"}
+                  </p>
                 </div>
-                <p className="mt-1 truncate text-sm text-(--foreground)/45">
-                  {lastMessage ? truncate(lastMessage.content, 40) : "No messages yet"}
-                </p>
               </Link>
             );
           })}
