@@ -8,6 +8,16 @@ use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Map, Vec};
 use storage::{DataKey, DepositEvent, WithdrawEvent, MemberAddedEvent, MemberRemovedEvent};
 use token_interface::TokenClient;
 
+fn require_admin(env: &Env) -> Address {
+    let admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .expect("not initialized");
+    admin.require_auth();
+    admin
+}
+
 #[contract]
 pub struct GroupTreasuryContract;
 
@@ -27,12 +37,7 @@ impl GroupTreasuryContract {
 
     /// Admin-only: Add a new member to the treasury.
     pub fn add_member(env: Env, member: Address) {
-        let admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .expect("not initialized");
-        admin.require_auth();
+        let admin = require_admin(&env);
 
         let mut members: Vec<Address> = env
             .storage()
@@ -61,12 +66,7 @@ impl GroupTreasuryContract {
 
     /// Admin-only: Remove a member from the treasury.
     pub fn remove_member(env: Env, member: Address) {
-        let admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .expect("not initialized");
-        admin.require_auth();
+        let admin = require_admin(&env);
 
         let mut members: Vec<Address> = env
             .storage()
@@ -158,12 +158,7 @@ impl GroupTreasuryContract {
             panic!("amount must be positive");
         }
 
-        let admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .expect("not initialized");
-        admin.require_auth();
+        let admin = require_admin(&env);
 
         let mut balances: Map<Address, i128> = env
             .storage()
