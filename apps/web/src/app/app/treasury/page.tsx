@@ -22,7 +22,7 @@ export default function TreasuryPage() {
         <h1 className="text-2xl md:text-3xl font-bold tracking-tight bg-gradient-to-r from-white via-foreground to-accent-light bg-clip-text text-transparent">
           Treasury Vault
         </h1>
-        <p className="text-sm text-foreground/40 mt-1">Manage and track your DAO's multi-signature assets on Stellar.</p>
+        <p className="text-sm text-foreground/40 mt-1">Manage and track your DAO&apos;s multi-signature assets on Stellar.</p>
       </div>
 
       {/* Summary Cards */}

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Socket } from "socket.io-client";
 import { useAuth } from "../../lib/auth";
 import { initSocket, closeSocket } from "../../lib/socket";
@@ -18,80 +18,53 @@ type TransferMsg = {
 };
 type Msg = TextMsg | TransferMsg;
 
+type MessageSender = { username?: string };
+type SocketMessage = {
+  id?: string;
+  content?: string;
+  sender?: MessageSender;
+  [key: string]: unknown;
+};
+
+function formatError(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message;
+  }
+
+  return typeof err === "string" ? err : "An unexpected error occurred";
+}
+
 export default function ChatPage() {
   const { token, isLoading: authLoading } = useAuth();
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [conversationId, setConversationId] = useState<string>("test-convo-1");
+  const [conversationId] = useState<string>("test-convo-1");
   const [messages, setMessages] = useState<Msg[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Initialize socket and join room
-  useEffect(() => {
-    if (!token || authLoading) return;
-
-    try {
-      const s = initSocket(token);
-      setSocket(s);
-
-      // Listen for new messages
-      s.on("new_message", (msg: any) => {
-        const parsedMsg = parseMessage(msg);
-        if (parsedMsg) {
-          setMessages((prev) => [...prev, parsedMsg]);
-        }
-      });
-
-      // Listen for room joined
-      s.on("room_joined", ({ conversationId: cid }: any) => {
-        console.log("Joined room:", cid);
-        // Load message history
-        s.emit("message_history", { conversationId: cid });
-      });
-
-      // Listen for message history
-      s.on("message_history", (data: any) => {
-        const history = data.messages || [];
-        const parsed = history
-          .map((msg) => parseMessage(msg))
-          .filter((m) => m !== null) as Msg[];
-        setMessages(parsed.reverse());
-        setLoading(false);
-      });
-
-      // Listen for errors
-      s.on("error", (err: any) => {
-        console.error("Socket error:", err);
-        setError(String(err?.message || err));
-      });
-
-      // Join the default conversation
-      s.emit("join_room", { conversationId });
-
-      return () => {
-        closeSocket();
-      };
-    } catch (err: any) {
-      setError(String(err?.message || err));
-      setLoading(false);
-    }
-  }, [token, authLoading, conversationId]);
-
-  function parseMessage(msg: any): Msg | null {
+  const parseMessage = useCallback((msg: SocketMessage | null | undefined): Msg | null => {
     if (!msg) return null;
 
-    const content = msg.content || "";
-    const sender = msg.sender || { username: "unknown" };
+    const content = typeof msg.content === "string" ? msg.content : "";
+    const senderName = typeof msg.sender?.username === "string" ? msg.sender.username : "unknown";
+    const sender = { username: senderName };
 
-    // Try to parse as JSON for transfer messages
     try {
-      const parsed = JSON.parse(content);
-      if (parsed.type === "transfer" && parsed.txHash) {
+      const parsed = JSON.parse(content) as Partial<TransferMsg> & {
+        type?: string;
+        txHash?: string;
+        amount?: number | string;
+        token?: string;
+      };
+
+      if (parsed?.type === "transfer" && typeof parsed.txHash === "string") {
+        const amountValue = typeof parsed.amount === "number" ? parsed.amount : Number(parsed.amount);
+
         return {
-          id: msg.id,
+          id: typeof msg.id === "string" ? msg.id : `${sender.username}-${Date.now()}`,
           type: "transfer",
-          amount: parsed.amount,
-          token: parsed.token,
+          amount: Number.isFinite(amountValue) ? amountValue : 0,
+          token: typeof parsed.token === "string" ? parsed.token : undefined,
           txHash: parsed.txHash,
           sender,
         };
@@ -101,12 +74,63 @@ export default function ChatPage() {
     }
 
     return {
-      id: msg.id,
+      id: typeof msg.id === "string" ? msg.id : `${sender.username}-${Date.now()}`,
       type: "text",
       content,
       sender,
     };
-  }
+  }, []);
+
+  useEffect(() => {
+    if (!token || authLoading) return;
+
+    try {
+      const s = initSocket(token);
+      const frame = window.requestAnimationFrame(() => {
+        setSocket(s);
+      });
+
+      s.on("new_message", (msg: SocketMessage) => {
+        const parsedMsg = parseMessage(msg);
+        if (parsedMsg) {
+          setMessages((prev) => [...prev, parsedMsg]);
+        }
+      });
+
+      s.on("room_joined", ({ conversationId: cid }: { conversationId: string }) => {
+        console.log("Joined room:", cid);
+        s.emit("message_history", { conversationId: cid });
+      });
+
+      s.on("message_history", (data: { messages?: SocketMessage[] }) => {
+        const history = data.messages || [];
+        const parsed = history
+          .map((msg) => parseMessage(msg))
+          .filter((m): m is Msg => m !== null);
+        setMessages(parsed.reverse());
+        setLoading(false);
+      });
+
+      s.on("error", (err: unknown) => {
+        console.error("Socket error:", err);
+        setError(formatError(err));
+      });
+
+      s.emit("join_room", { conversationId });
+
+      return () => {
+        window.cancelAnimationFrame(frame);
+        closeSocket();
+      };
+    } catch (err: unknown) {
+      const frame = window.requestAnimationFrame(() => {
+        setError(formatError(err));
+        setLoading(false);
+      });
+
+      return () => window.cancelAnimationFrame(frame);
+    }
+  }, [token, authLoading, conversationId, parseMessage]);
 
   const recipient = "GDESTRECIPIENTEXAMPLEXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
 

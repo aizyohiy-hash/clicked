@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useState } from "react";
 
 type AuthContextType = {
   token: string | null;
@@ -15,22 +15,21 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [token, setToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [token, setToken] = useState<string | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
 
-  useEffect(() => {
-    // Load token from localStorage
-    const stored = localStorage.getItem("auth_token");
-    const envToken = process.env.NEXT_PUBLIC_AUTH_TOKEN;
-    setToken(stored || envToken || null);
-    setIsLoading(false);
-  }, []);
+    const stored = window.localStorage.getItem("auth_token");
+    return stored || process.env.NEXT_PUBLIC_AUTH_TOKEN || null;
+  });
+  const [isLoading] = useState(false);
 
   const updateToken = (newToken: string | null) => {
     if (newToken) {
-      localStorage.setItem("auth_token", newToken);
+      window.localStorage.setItem("auth_token", newToken);
     } else {
-      localStorage.removeItem("auth_token");
+      window.localStorage.removeItem("auth_token");
     }
     setToken(newToken);
   };

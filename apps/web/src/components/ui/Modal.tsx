@@ -25,13 +25,23 @@ export function Modal({ isOpen, onClose, title, children }: ModalProps) {
   const prevFocus = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (isOpen && visible !== "open") {
-      prevFocus.current = document.activeElement as HTMLElement;
+    if (!isOpen) {
+      if (visible === "open") {
+        const frame = window.requestAnimationFrame(() => {
+          setVisible("closing");
+        });
+        return () => window.cancelAnimationFrame(frame);
+      }
+
+      return;
+    }
+
+    prevFocus.current = document.activeElement as HTMLElement;
+    const frame = window.requestAnimationFrame(() => {
       setVisible("open");
-    }
-    if (!isOpen && visible === "open") {
-      setVisible("closing");
-    }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
   }, [isOpen, visible]);
 
   useEffect(() => {

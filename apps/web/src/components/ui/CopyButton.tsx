@@ -23,7 +23,7 @@ export const CopyButton: React.FC<CopyButtonProps> = ({ value, className = '' })
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       }
-    } catch (err) {}
+    } catch {}
   };
 
   return (

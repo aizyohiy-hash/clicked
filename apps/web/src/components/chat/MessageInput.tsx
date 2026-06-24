@@ -52,8 +52,9 @@ export default function MessageInput({ conversationId, recipient, socket }: Prop
       });
       setAmount("");
       setShowPay(false);
-    } catch (err: any) {
-      alert(String(err?.message || err));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      alert(message);
     } finally {
       setBusy(false);
     }

@@ -13,7 +13,7 @@ export async function transferToken(
   const stellar = await import("stellar-sdk");
 
   const { SorobanRpc, xdr, TransactionBuilder, BASE_FEE, Contract, Networks, nativeToScVal } =
-    stellar as any;
+    stellar;
 
   const RPC_URL =
     process.env.NEXT_PUBLIC_SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
@@ -28,7 +28,6 @@ export async function transferToken(
 
   const publicKey = await freighter.getPublicKey();
 
-  // Build contract call operation
   const contract = new Contract(CONTRACT_ID);
 
   const fromSc = nativeToScVal(publicKey, { type: "address" });
@@ -62,7 +61,7 @@ export async function transferToken(
     networkPassphrase: NETWORK_PASSPHRASE,
   });
 
-  const { Transaction } = stellar as any;
+  const { Transaction } = stellar;
   const signedTx = new Transaction(signedXdr, NETWORK_PASSPHRASE);
   const sendResult = await server.sendTransaction(signedTx);
 
@@ -72,16 +71,15 @@ export async function transferToken(
 
   const hash = sendResult.hash;
 
-  // Poll for final status
   for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise((resolve) => setTimeout(resolve, 2000));
     try {
       const status = await server.getTransaction(hash);
       if (status.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) return hash;
       if (status.status === SorobanRpc.Api.GetTransactionStatus.FAILED) {
         throw new Error(`Transaction reverted: ${hash}`);
       }
-    } catch (err) {
+    } catch {
       // keep polling until timeout
     }
   }

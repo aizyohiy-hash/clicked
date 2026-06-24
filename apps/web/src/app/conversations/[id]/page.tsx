@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import Image from "next/image";
 import { useParams } from "next/navigation";
 import { useSocket } from "@/hooks/useSocket";
 
@@ -43,9 +44,11 @@ function dayKey(iso: string) {
 function Avatar({ src, name }: { src: string | null; name: string }) {
   if (src) {
     return (
-      <img
+      <Image
         src={src}
         alt={name}
+        width={32}
+        height={32}
         className="h-8 w-8 rounded-full object-cover flex-shrink-0"
       />
     );
