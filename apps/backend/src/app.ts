@@ -7,9 +7,9 @@ import { sql } from 'drizzle-orm';
 import { db } from './db/index.js';
 import { authRouter } from './routes/auth.js';
 import { conversationsRouter } from './routes/conversations.js';
+import { devicesRouter } from './routes/devices.js';
 import { messagesRouter } from './routes/messages.js';
 import { usersRouter } from './routes/users.js';
-import { devicesRouter } from './routes/devices.js';
 import { treasuryRouter } from './routes/treasury.js';
 import { requireAuth, type AuthRequest } from './middleware/auth.js';
 
@@ -47,9 +47,9 @@ app.get('/health', async (_req, res) => {
 
 app.use('/auth', authRouter);
 app.use('/conversations', conversationsRouter);
+app.use('/devices', devicesRouter);
 app.use('/messages', messagesRouter);
 app.use('/users', usersRouter);
-app.use('/devices', devicesRouter);
 app.use('/treasury', treasuryRouter);
 
 app.get('/me', requireAuth, (req, res) => {
