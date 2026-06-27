@@ -18,12 +18,14 @@ import {
   runForever as runStellarListener,
 } from './services/stellarListener.js';
 import { loadEnv } from './config.js';
+import { createObjectStore } from './lib/objectStore.js';
 
 dotenv.config();
 
 // Validate required environment variables at boot. Exits with code 1 and
 // logs the offending vars if anything is missing or malformed.
-loadEnv();
+const env = loadEnv();
+export const objectStore = createObjectStore(env);
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -122,6 +124,18 @@ httpServer.listen(PORT, () => {
 // Attach the Redis adapter after listen() so the API is reachable even if
 // Redis is unreachable; on failure we fall back to the in-process adapter.
 void attachRedisAdapter();
+
+// #223 — Verify object storage is reachable when the API boots. Logs a
+// warning instead of crashing so unit tests and partial local setups still run.
+void objectStore
+  .ensureBucketReachable()
+  .then(() => {
+    console.log(`[object-store] bucket "${env.OBJECT_STORE_BUCKET}" reachable`);
+  })
+  .catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[object-store] bucket unreachable (${message})`);
+  });
 
 // #46 — Stellar transfer event listener. Only spin up when the contract
 // id is configured so local-dev and unit-test runs don't try to talk to
