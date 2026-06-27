@@ -67,17 +67,22 @@ export const messages = pgTable(
     senderId: uuid('sender_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    content: text('content').notNull(),
+    senderDeviceId: uuid('sender_device_id')
+      .notNull()
+      .references(() => userDevices.id, { onDelete: 'cascade' }),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     deletedAt: timestamp('deleted_at'),
   },
-  (table) => [
-    index('messages_content_search_idx').using(
-      'gin',
-      sql`to_tsvector('english', ${table.content})`,
-    ),
-  ],
 );
+
+export const messageEnvelopes = pgTable('message_envelopes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  messageId: uuid('message_id')
+    .notNull()
+    .references(() => messages.id, { onDelete: 'cascade' }),
+  content: text('content').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
 
 // ─── Devices & prekeys (issues #158, #159, #162) ─────────────────────────────
 //
@@ -259,12 +264,24 @@ export const conversationMembersRelations = relations(conversationMembers, ({ on
   user: one(users, { fields: [conversationMembers.userId], references: [users.id] }),
 }));
 
-export const messagesRelations = relations(messages, ({ one }) => ({
+export const messagesRelations = relations(messages, ({ one, many }) => ({
   conversation: one(conversations, {
     fields: [messages.conversationId],
     references: [conversations.id],
   }),
   sender: one(users, { fields: [messages.senderId], references: [users.id] }),
+  senderDevice: one(userDevices, {
+    fields: [messages.senderDeviceId],
+    references: [userDevices.id],
+  }),
+  envelopes: many(messageEnvelopes),
+}));
+
+export const messageEnvelopesRelations = relations(messageEnvelopes, ({ one }) => ({
+  message: one(messages, {
+    fields: [messageEnvelopes.messageId],
+    references: [messages.id],
+  }),
 }));
 
 export const tokenTransfersRelations = relations(tokenTransfers, ({ one }) => ({
@@ -282,6 +299,11 @@ export const devicesRelations = relations(devices, ({ one, many }) => ({
   user: one(users, { fields: [devices.userId], references: [users.id] }),
   signedPreKey: many(signedPreKeys),
   oneTimePreKeys: many(oneTimePreKeys),
+}));
+
+export const userDevicesRelations = relations(userDevices, ({ one, many }) => ({
+  user: one(users, { fields: [userDevices.userId], references: [users.id] }),
+  messages: many(messages),
 }));
 
 export const signedPreKeysRelations = relations(signedPreKeys, ({ one }) => ({
@@ -303,6 +325,8 @@ export type NewConversation = typeof conversations.$inferInsert;
 export type ConversationMember = typeof conversationMembers.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
+export type MessageEnvelope = typeof messageEnvelopes.$inferSelect;
+export type NewMessageEnvelope = typeof messageEnvelopes.$inferInsert;
 export type TokenTransfer = typeof tokenTransfers.$inferSelect;
 export type NewTokenTransfer = typeof tokenTransfers.$inferInsert;
 export type Device = typeof devices.$inferSelect;

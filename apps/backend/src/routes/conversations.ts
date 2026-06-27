@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { IRouter } from 'express';
 import { asc, and, count, desc, eq, lt, sql, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { conversationMembers, conversations, messages, tokenTransfers } from '../db/schema.js';
+import { messageEnvelopes } from '../db/schema.js';
 import { requireAuth, type AuthRequest } from '../middleware/auth.js';
 import { redis, CONV_CACHE_TTL, convCacheKey } from '../lib/redis.js';
 import { invalidateConversationCaches } from '../lib/conversationCache.js';
@@ -28,7 +28,7 @@ const conversationRelations = {
   messages: {
     orderBy: desc(messages.createdAt),
     limit: 1,
-    with: { sender: { columns: { id: true, username: true, avatarUrl: true } } },
+    with: { sender: { columns: { id: true, username: true, avatarUrl: true } }, envelopes: true, senderDevice: true },
   },
 } as const;
 
@@ -471,7 +471,7 @@ conversationsRouter.get('/:id/messages', async (req: AuthRequest, res) => {
       : eq(messages.conversationId, conversationId),
     orderBy: desc(messages.createdAt),
     limit: limit + 1,
-    with: { sender: { columns: { id: true, username: true, avatarUrl: true } } },
+    with: { sender: { columns: { id: true, username: true, avatarUrl: true } }, envelopes: true, senderDevice: true },
   });
 
   const hasMore = rows.length > limit;
@@ -528,19 +528,20 @@ conversationsRouter.get('/:id/search', async (req: AuthRequest, res) => {
       ${messages.id} AS "id",
       ${messages.conversationId} AS "conversationId",
       ${messages.senderId} AS "senderId",
-      ${messages.content} AS "content",
+      ${messageEnvelopes.content} AS "content",
       ${messages.createdAt} AS "createdAt",
       ts_headline(
         'english',
-        ${messages.content},
+        ${messageEnvelopes.content},
         search_query.query,
         'StartSel=<mark>, StopSel=</mark>, MaxWords=24, MinWords=8, ShortWord=3, HighlightAll=false'
       ) AS "snippet",
-      ts_rank_cd(to_tsvector('english', ${messages.content}), search_query.query) AS "rank"
-    FROM ${messages}, search_query
+      ts_rank_cd(to_tsvector('english', ${messageEnvelopes.content}), search_query.query) AS "rank"
+    FROM ${messages}
+    JOIN ${messageEnvelopes} ON ${messageEnvelopes.messageId} = ${messages.id}, search_query
     WHERE ${messages.conversationId} = ${conversationId}
       AND ${messages.deletedAt} IS NULL
-      AND search_query.query @@ to_tsvector('english', ${messages.content})
+      AND search_query.query @@ to_tsvector('english', ${messageEnvelopes.content})
     ORDER BY "rank" DESC, ${messages.createdAt} DESC
     LIMIT ${SEARCH_RESULT_LIMIT}
   `);

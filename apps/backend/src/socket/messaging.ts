@@ -1,7 +1,7 @@
 import type { Server } from 'socket.io';
 import { and, eq, lt, desc, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { conversations, conversationMembers, messages } from '../db/schema.js';
+import { conversations, conversationMembers, messages, messageEnvelopes, userDevices } from '../db/schema.js';
 import type { AuthSocket } from '../middleware/socketAuth.js';
 import { invalidateConversationCaches } from '../lib/conversationCache.js';
 import { serializeMessage } from '../lib/messages.js';
@@ -57,12 +57,41 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       return;
     }
 
+    // Get the user's primary device (or first active device)
+    const userDevice = await db.query.userDevices.findFirst({
+      where: and(eq(userDevices.userId, userId), eq(userDevices.revokedAt, null)),
+    });
+
+    if (!userDevice) {
+      socket.emit('error', { event: 'send_message', message: 'No active device found' });
+      return;
+    }
+
     const [message] = await db
       .insert(messages)
-      .values({ conversationId, senderId: userId, content: content.trim() })
+      .values({
+        conversationId,
+        senderId: userId,
+        senderDeviceId: userDevice.id,
+      })
       .returning();
 
-    io.to(conversationId).emit('new_message', message);
+    // Create the message envelope with the content
+    await db.insert(messageEnvelopes).values({
+      messageId: message.id,
+      content: content.trim(),
+    });
+
+    // Fetch the complete message with envelopes
+    const completeMessage = await db.query.messages.findFirst({
+      where: eq(messages.id, message.id),
+      with: {
+        envelopes: true,
+        senderDevice: true,
+      },
+    });
+
+    io.to(conversationId).emit('new_message', completeMessage);
 
     const members = await db.query.conversationMembers.findMany({
       where: eq(conversationMembers.conversationId, conversationId),
@@ -107,7 +136,11 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
         : eq(messages.conversationId, conversationId),
       orderBy: desc(messages.createdAt),
       limit: PAGE_SIZE,
-      with: { sender: { columns: { id: true, username: true, avatarUrl: true } } },
+      with: {
+        envelopes: true,
+        senderDevice: true,
+        sender: { columns: { id: true, username: true, avatarUrl: true } },
+      },
     });
 
     socket.emit('message_history', {
@@ -311,17 +344,51 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
         ON CONFLICT DO NOTHING
       `);
 
+      // Get or create an assistant device
+      let assistantDevice = await db.query.userDevices.findFirst({
+        where: eq(userDevices.userId, ASSISTANT_USER_ID),
+      });
+
+      if (!assistantDevice) {
+        const [newDevice] = await db
+          .insert(userDevices)
+          .values({
+            userId: ASSISTANT_USER_ID,
+            deviceId: 'assistant-device',
+            deviceName: 'Assistant',
+            platform: 'web',
+            identityPublicKey: 'assistant-public-key',
+          })
+          .returning();
+        assistantDevice = newDevice;
+      }
+
       // Post the reply
       const [replyMessage] = await db
         .insert(messages)
         .values({
           conversationId,
           senderId: ASSISTANT_USER_ID,
-          content: data.reply,
+          senderDeviceId: assistantDevice.id,
         })
         .returning();
 
-      io.to(conversationId).emit('new_message', replyMessage);
+      // Create the message envelope with the content
+      await db.insert(messageEnvelopes).values({
+        messageId: replyMessage.id,
+        content: data.reply,
+      });
+
+      // Fetch the complete message with envelopes
+      const completeMessage = await db.query.messages.findFirst({
+        where: eq(messages.id, replyMessage.id),
+        with: {
+          envelopes: true,
+          senderDevice: true,
+        },
+      });
+
+      io.to(conversationId).emit('new_message', completeMessage);
 
       const members = await db.query.conversationMembers.findMany({
         where: eq(conversationMembers.conversationId, conversationId),
