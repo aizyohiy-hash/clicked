@@ -76,6 +76,15 @@ export const files = pgTable('files', {
     .notNull()
     .references(() => conversations.id, { onDelete: 'cascade' }),
   status: fileStatusEnum('status').notNull().default('pending'),
+  // Metadata supplied by the client on upload-slot creation.
+  // Size in bytes; mimeType is validated against an allowlist.
+  size: integer('size').notNull(),
+  mimeType: text('mime_type').notNull(),
+  sha256: text('sha256').notNull(),
+  // Object-storage key for the encrypted bytes (set by the server).
+  storageKey: text('storage_key').notNull(),
+  // When true this file is a thumbnail for another file (parent referenced in message payload).
+  isThumbnail: boolean('is_thumbnail').notNull().default(false),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
