@@ -8,6 +8,7 @@ const mockUpdate = vi.fn();
 
 const mockEmit = vi.fn();
 const mockTo = vi.fn(() => ({ emit: mockEmit }));
+const mockDelete = vi.fn();
 let mockSocketServer: { to: typeof mockTo } | null = { to: mockTo };
 
 vi.mock('../lib/socket.js', () => ({
@@ -31,6 +32,7 @@ vi.mock('../db/index.js', () => ({
       conversationMembers: { findMany: mockFindMembers },
     },
     update: mockUpdate,
+    delete: mockDelete,
   },
 }));
 
@@ -45,6 +47,7 @@ vi.mock('../db/schema.js', () => ({
     createdAt: 'createdAt',
     deletedAt: 'deletedAt',
   },
+  messageEnvelopes: { messageId: 'messageId' },
   tokenTransfers: {},
 }));
 
@@ -104,14 +107,16 @@ describe('DELETE /messages/:id', () => {
 
     const setFn = vi.fn().mockReturnThis();
     const whereFn = vi.fn().mockResolvedValue([{ conversationId: 'conv-1' }]);
+    const deleteWhereFn = vi.fn().mockResolvedValue([]);
     mockUpdate.mockReturnValue({ set: setFn });
     setFn.mockReturnValue({ where: whereFn });
+    mockDelete.mockReturnValue({ where: deleteWhereFn });
     mockFindMembers.mockResolvedValue([{ userId: 'user-1' }, { userId: 'user-2' }]);
 
     const res = await request(makeApp()).delete('/messages/msg-1');
 
     expect(res.status).toBe(204);
-    expect(setFn).toHaveBeenCalledWith({ deletedAt: expect.any(Date) });
+    expect(setFn).toHaveBeenCalledWith({ deletedAt: expect.any(Date), ciphertext: null });
     expect(mockTo).toHaveBeenCalledWith('conv-1');
     expect(mockEmit).toHaveBeenCalledWith('message_deleted', {
       messageId: 'msg-1',

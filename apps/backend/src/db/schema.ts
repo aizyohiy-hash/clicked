@@ -7,8 +7,8 @@ import {
   pgEnum,
   index,
   integer,
+  serial,
   uniqueIndex,
-  bigint,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 
@@ -68,31 +68,45 @@ export const conversationMembers = pgTable('conversation_members', {
   joinedAt: timestamp('joined_at').notNull().defaultNow(),
 });
 
-export const messages = pgTable(
-  'messages',
+export const messages = pgTable('messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  conversationId: uuid('conversation_id')
+    .notNull()
+    .references(() => conversations.id, { onDelete: 'cascade' }),
+  senderId: uuid('sender_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  senderDeviceId: uuid('sender_device_id').references(() => userDevices.id, {
+    onDelete: 'set null',
+  }),
+  contentType: text('content_type').notNull().default('text/plain'),
+  sequenceNumber: serial('sequence_number'),
+  ciphertext: text('ciphertext'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at'),
+});
+
+export const messageEnvelopes = pgTable(
+  'message_envelopes',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    conversationId: uuid('conversation_id')
+    messageId: uuid('message_id')
       .notNull()
-      .references(() => conversations.id, { onDelete: 'cascade' }),
-    senderId: uuid('sender_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
-    content: text('content').notNull(),
-    contentType: contentTypeEnum('content_type').notNull().default('text'),
-    senderDeviceId: uuid('sender_device_id')
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    recipientDeviceId: uuid('recipient_device_id')
       .notNull()
       .references(() => userDevices.id, { onDelete: 'cascade' }),
-    sequenceNumber: bigint('sequence_number', { mode: 'bigint' }).notNull(),
-    expiresAt: timestamp('expires_at'),
+    recipientUserId: uuid('recipient_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    ciphertext: text('ciphertext').notNull(),
+    deliveredAt: timestamp('delivered_at'),
+    readAt: timestamp('read_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
-    deletedAt: timestamp('deleted_at'),
   },
   (table) => [
-    index('messages_content_search_idx').using(
-      'gin',
-      sql`to_tsvector('english', ${table.content})`,
-    ),
+    index('me_recipient_device_created_idx').on(table.recipientDeviceId, table.createdAt),
+    index('me_message_idx').on(table.messageId),
   ],
 );
 
@@ -276,7 +290,7 @@ export const conversationMembersRelations = relations(conversationMembers, ({ on
   user: one(users, { fields: [conversationMembers.userId], references: [users.id] }),
 }));
 
-export const messagesRelations = relations(messages, ({ one }) => ({
+export const messagesRelations = relations(messages, ({ one, many }) => ({
   conversation: one(conversations, {
     fields: [messages.conversationId],
     references: [conversations.id],
@@ -286,6 +300,16 @@ export const messagesRelations = relations(messages, ({ one }) => ({
     fields: [messages.senderDeviceId],
     references: [userDevices.id],
   }),
+  envelopes: many(messageEnvelopes),
+}));
+
+export const messageEnvelopesRelations = relations(messageEnvelopes, ({ one }) => ({
+  message: one(messages, { fields: [messageEnvelopes.messageId], references: [messages.id] }),
+  recipientDevice: one(userDevices, {
+    fields: [messageEnvelopes.recipientDeviceId],
+    references: [userDevices.id],
+  }),
+  recipientUser: one(users, { fields: [messageEnvelopes.recipientUserId], references: [users.id] }),
 }));
 
 export const tokenTransfersRelations = relations(tokenTransfers, ({ one }) => ({
@@ -329,6 +353,8 @@ export type NewConversation = typeof conversations.$inferInsert;
 export type ConversationMember = typeof conversationMembers.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
+export type MessageEnvelope = typeof messageEnvelopes.$inferSelect;
+export type NewMessageEnvelope = typeof messageEnvelopes.$inferInsert;
 export type TokenTransfer = typeof tokenTransfers.$inferSelect;
 export type NewTokenTransfer = typeof tokenTransfers.$inferInsert;
 export type Device = typeof devices.$inferSelect;
