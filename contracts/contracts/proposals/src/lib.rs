@@ -25,7 +25,7 @@ use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, String, Sy
 
 pub use storage::{
     DataKey, Proposal, ProposalCreatedEvent, ProposalExecutedEvent, ProposalFinalizedEvent,
-    ProposalStatus, VoteCastEvent,
+    ProposalStatus, VoteCastEvent, ProposalExpiredEvent,
 };
 
 // ── Contract ─────────────────────────────────────────────────────────────────
@@ -189,6 +189,28 @@ impl ProposalsContract {
             },
         );
         new_status
+    }
+
+    pub fn finalize_expired_proposal(env: Env, proposal_id: u64) {
+        let mut proposal = Self::load_proposal(&env, proposal_id);
+
+        if !matches!(proposal.status, ProposalStatus::Active) {
+            panic!("proposal not Pending");
+        }
+        let now = env.ledger().timestamp();
+        if now <= proposal.expires_at {
+            panic!("proposal not expired");
+        }
+
+        proposal.status = ProposalStatus::Expired;
+        env.storage()
+            .instance()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+
+        env.events().publish(
+            (Symbol::new(&env, "proposal_expired"),),
+            ProposalExpiredEvent { id: proposal_id },
+        );
     }
 
     /// Execute a Passed proposal. Refuses unless `status == Passed`.

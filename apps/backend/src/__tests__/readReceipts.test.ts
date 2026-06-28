@@ -49,11 +49,13 @@ function makeSocket(userId: string) {
 
 function makeIo() {
   const roomEmitted: { event: string; data: unknown }[] = [];
+  const emitFn = vi.fn((event: string, data: unknown) => {
+    roomEmitted.push({ event, data });
+  });
   const io = {
     to: vi.fn(() => ({
-      emit: vi.fn((event: string, data: unknown) => {
-        roomEmitted.push({ event, data });
-      }),
+      emit: emitFn,
+      volatile: { emit: emitFn },
     })),
     roomEmitted,
   };

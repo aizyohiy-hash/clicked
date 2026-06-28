@@ -332,7 +332,7 @@ impl GroupTreasuryContract {
         if proposal.status != ProposalStatus::Active {
             panic!("proposal is not pending");
         }
-        if env.ledger().timestamp() >= proposal.expires_at {
+        if proposal.status == ProposalStatus::Expired || env.ledger().timestamp() >= proposal.expires_at {
             panic!("proposal expired");
         }
         if env
