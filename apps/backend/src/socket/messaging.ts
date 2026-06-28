@@ -1,7 +1,7 @@
 import type { Server } from 'socket.io';
 import { and, eq, lt, desc, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { conversations, conversationMembers, messages } from '../db/schema.js';
+import { users, conversations, conversationMembers, messages } from '../db/schema.js';
 import type { AuthSocket } from '../middleware/socketAuth.js';
 import { invalidateConversationCaches } from '../lib/conversationCache.js';
 import { serializeMessage } from '../lib/messages.js';
@@ -152,17 +152,36 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
         return;
       }
 
-      await db
-        .update(conversationMembers)
-        .set({ lastReadMessageId })
-        .where(
-          and(
-            eq(conversationMembers.conversationId, conversationId),
-            eq(conversationMembers.userId, userId),
-          ),
-        );
+      // Monotonic read cursor: only advance if newer
+      let shouldUpdate = true;
+      if (membership.lastReadMessageId) {
+        const previousMessage = await db.query.messages.findFirst({
+          where: and(eq(messages.id, membership.lastReadMessageId), eq(messages.conversationId, conversationId)),
+        });
+        if (previousMessage && previousMessage.createdAt && message.createdAt) {
+          if (message.createdAt <= previousMessage.createdAt) {
+            shouldUpdate = false;
+          }
+        }
+      }
 
-      io.to(conversationId).emit('read_receipt', { userId, lastReadMessageId });
+      if (shouldUpdate) {
+        await db
+          .update(conversationMembers)
+          .set({ lastReadMessageId })
+          .where(
+            and(
+              eq(conversationMembers.conversationId, conversationId),
+              eq(conversationMembers.userId, userId),
+            ),
+          );
+      }
+
+      // Respect user privacy setting for read receipts
+      const user = db.query.users?.findFirst ? await db.query.users.findFirst({ where: eq(users.id, userId) }) : undefined;
+      if ((user?.sendReadReceipts ?? true) && shouldUpdate) {
+        io.to(conversationId).emit('read_receipt', { userId, lastReadMessageId });
+      }
     },
   );
 

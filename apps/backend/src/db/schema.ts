@@ -17,6 +17,8 @@ export const users = pgTable('users', {
   avatarUrl: text('avatar_url'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  // Privacy setting: whether the user allows sending read receipts to others
+  sendReadReceipts: boolean('send_read_receipts').notNull().default(true),
 });
 
 export const wallets = pgTable('wallets', {
@@ -257,6 +259,10 @@ export const conversationMembersRelations = relations(conversationMembers, ({ on
     references: [conversations.id],
   }),
   user: one(users, { fields: [conversationMembers.userId], references: [users.id] }),
+  lastReadMessage: one(messages, {
+    fields: [conversationMembers.lastReadMessageId],
+    references: [messages.id],
+  }),
 }));
 
 export const messagesRelations = relations(messages, ({ one }) => ({
