@@ -18,14 +18,22 @@ function presenceKey(userId: string): string {
   return `presence:${userId}`;
 }
 
-/**
- * Register a socket connection for a user. Adds the socketId to the
- * user's presence set and sets/refreshes the TTL.
- */
-export async function setOnline(redis: Redis, userId: string, socketId: string): Promise<void> {
+export async function setOnline(redis: Redis, userId: string, socketId: string): Promise<boolean> {
   const key = presenceKey(userId);
+  const debounceKey = `presence_debounce:${userId}`;
+
+  const count = await redis.scard(key);
   await redis.sadd(key, socketId);
   await redis.expire(key, PRESENCE_TTL);
+
+  if (count === 0) {
+    const debouncing = await redis.del(debounceKey);
+    if (debouncing === 1) {
+      return false; // Flap detected, don't broadcast online
+    }
+    return true; // First socket connected
+  }
+  return false;
 }
 
 /**
@@ -39,16 +47,15 @@ export async function refreshPresence(redis: Redis, userId: string): Promise<voi
   }
 }
 
-/**
- * Remove a socket connection from the user's presence set.
- * Returns true if the user has gone fully offline (no remaining sockets).
- */
 export async function setOffline(redis: Redis, userId: string, socketId: string): Promise<boolean> {
   const key = presenceKey(userId);
+  const debounceKey = `presence_debounce:${userId}`;
+
   await redis.srem(key, socketId);
   const remaining = await redis.scard(key);
   if (remaining === 0) {
     await redis.del(key);
+    await redis.set(debounceKey, '1', 'EX', 3);
     return true;
   }
   return false;

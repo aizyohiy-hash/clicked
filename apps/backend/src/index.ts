@@ -11,7 +11,7 @@ import { registerMessagingHandlers } from './socket/messaging.js';
 import { app } from './app.js';
 import { redis as appRedis } from './lib/redis.js';
 import { setSocketServer } from './lib/socket.js';
-import { setOnline, setOffline, refreshPresence } from './services/presence.js';
+import { setOnline, setOffline, refreshPresence, isOnline } from './services/presence.js';
 import {
   buildRpcFetcher,
   buildTreasuryRpcFetcher,
@@ -49,10 +49,12 @@ io.on('connection', async (socket: AuthSocket) => {
   }
 
   if (appRedis) {
-    await setOnline(appRedis, userId, socket.id);
-    for (const m of memberships) {
-      io.to(m.conversationId).emit('user_online', { userId });
-      io.to(m.conversationId).emit('presence_update', { userId, online: true });
+    const shouldBroadcast = await setOnline(appRedis, userId, socket.id);
+    if (shouldBroadcast) {
+      for (const m of memberships) {
+        io.to(m.conversationId).emit('user_online', { userId });
+        io.to(m.conversationId).emit('presence_update', { userId, online: true, status: 'online', lastSeen: Date.now() });
+      }
     }
   }
 
@@ -67,16 +69,21 @@ io.on('connection', async (socket: AuthSocket) => {
   socket.on('disconnect', async () => {
     console.log('User disconnected:', userId);
     if (appRedis) {
-      const fullyOffline = await setOffline(appRedis, userId, socket.id);
-      if (fullyOffline) {
-        const memberships = await db.query.conversationMembers.findMany({
-          where: eq(conversationMembers.userId, userId),
-          columns: { conversationId: true },
-        });
-        for (const m of memberships) {
-          io.to(m.conversationId).emit('user_offline', { userId });
-          io.to(m.conversationId).emit('presence_update', { userId, online: false });
-        }
+      const startDebounce = await setOffline(appRedis, userId, socket.id);
+      if (startDebounce) {
+        setTimeout(async () => {
+          const currentlyOnline = await isOnline(appRedis, userId);
+          if (!currentlyOnline) {
+            const memberships = await db.query.conversationMembers.findMany({
+              where: eq(conversationMembers.userId, userId),
+              columns: { conversationId: true },
+            });
+            for (const m of memberships) {
+              io.to(m.conversationId).emit('user_offline', { userId });
+              io.to(m.conversationId).emit('presence_update', { userId, online: false, status: 'offline', lastSeen: Date.now() });
+            }
+          }
+        }, 3000);
       }
     }
   });
