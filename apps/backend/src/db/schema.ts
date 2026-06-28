@@ -8,6 +8,7 @@ import {
   index,
   integer,
   uniqueIndex,
+  bigint,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 
@@ -42,6 +43,15 @@ export const conversations = pgTable('conversations', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
+export const contentTypeEnum = pgEnum('content_type', [
+  'text',
+  'file',
+  'image',
+  'video',
+  'audio',
+  'system',
+]);
+
 export const conversationMembers = pgTable('conversation_members', {
   id: uuid('id').primaryKey().defaultRandom(),
   conversationId: uuid('conversation_id')
@@ -69,6 +79,12 @@ export const messages = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     content: text('content').notNull(),
+    contentType: contentTypeEnum('content_type').notNull().default('text'),
+    senderDeviceId: uuid('sender_device_id')
+      .notNull()
+      .references(() => userDevices.id, { onDelete: 'cascade' }),
+    sequenceNumber: bigint('sequence_number', { mode: 'bigint' }).notNull(),
+    expiresAt: timestamp('expires_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     deletedAt: timestamp('deleted_at'),
   },
@@ -266,6 +282,10 @@ export const messagesRelations = relations(messages, ({ one }) => ({
     references: [conversations.id],
   }),
   sender: one(users, { fields: [messages.senderId], references: [users.id] }),
+  senderDevice: one(userDevices, {
+    fields: [messages.senderDeviceId],
+    references: [userDevices.id],
+  }),
 }));
 
 export const tokenTransfersRelations = relations(tokenTransfers, ({ one }) => ({
@@ -293,6 +313,11 @@ export const oneTimePreKeysRelations = relations(oneTimePreKeys, ({ one }) => ({
   device: one(devices, { fields: [oneTimePreKeys.deviceId], references: [devices.id] }),
 }));
 
+export const userDevicesRelations = relations(userDevices, ({ one, many }) => ({
+  user: one(users, { fields: [userDevices.userId], references: [users.id] }),
+  messages: many(messages),
+}));
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type User = typeof users.$inferSelect;
@@ -312,3 +337,5 @@ export type SignedPreKey = typeof signedPreKeys.$inferSelect;
 export type NewSignedPreKey = typeof signedPreKeys.$inferInsert;
 export type OneTimePreKey = typeof oneTimePreKeys.$inferSelect;
 export type NewOneTimePreKey = typeof oneTimePreKeys.$inferInsert;
+export type UserDevice = typeof userDevices.$inferSelect;
+export type NewUserDevice = typeof userDevices.$inferInsert;
