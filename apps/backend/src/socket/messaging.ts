@@ -1,5 +1,5 @@
 import type { Server } from 'socket.io';
-import { and, eq, lt, desc, sql, inArray } from 'drizzle-orm';
+import { and, eq, lt, desc, sql, inArray, isNull, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   conversations,
@@ -15,6 +15,27 @@ import { redis } from '../lib/redis.js';
 import { publishEphemeral, readMissedEvents } from '../services/resumeStream.js';
 
 const PAGE_SIZE = 30;
+
+/**
+ * Returns the UUIDs of all active (non-revoked) user_devices that belong to
+ * `userId` but are NOT the sending device (`senderDeviceId`). These are the
+ * "sibling" devices that must each receive their own envelope so they can
+ * decrypt the message locally. Issue #188.
+ */
+async function fetchSiblingDeviceIds(
+  userId: string,
+  senderDeviceId: string,
+): Promise<string[]> {
+  const siblings = await db.query.userDevices.findMany({
+    where: and(
+      eq(userDevices.userId, userId),
+      ne(userDevices.id, senderDeviceId),
+      isNull(userDevices.revokedAt),
+    ),
+    columns: { id: true },
+  });
+  return siblings.map((d) => d.id);
+}
 
 export function registerMessagingHandlers(io: Server, socket: AuthSocket): void {
   const userId = socket.auth!.userId;
@@ -90,6 +111,23 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       if (existing) {
         socket.emit('message_ack', { messageId, sequenceNumber: existing.sequenceNumber });
         return;
+      }
+
+      // Enforce full sibling-device coverage (#188).
+      // Every active device the sender owns (other than the sending device)
+      // must appear in the envelopes array so each can decrypt the message.
+      const siblingIds = await fetchSiblingDeviceIds(userId, deviceId);
+      if (siblingIds.length > 0) {
+        const providedIds = new Set(envelopes?.map((e) => e.recipientDeviceId) ?? []);
+        const missing = siblingIds.filter((id) => !providedIds.has(id));
+        if (missing.length > 0) {
+          socket.emit('error', {
+            event: 'device_set_mismatch',
+            message: `Missing envelopes for ${missing.length} sibling device(s)`,
+            missingDeviceIds: missing,
+          });
+          return;
+        }
       }
 
       const [message] = await db
@@ -207,6 +245,21 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       if (existing) {
         socket.emit('message_ack', { messageId, sequenceNumber: existing.sequenceNumber });
         return;
+      }
+
+      // Enforce full sibling-device coverage (#188).
+      const siblingIds = await fetchSiblingDeviceIds(userId, deviceId);
+      if (siblingIds.length > 0) {
+        const providedIds = new Set(envelopes?.map((e) => e.recipientDeviceId) ?? []);
+        const missing = siblingIds.filter((id) => !providedIds.has(id));
+        if (missing.length > 0) {
+          socket.emit('error', {
+            event: 'device_set_mismatch',
+            message: `Missing envelopes for ${missing.length} sibling device(s)`,
+            missingDeviceIds: missing,
+          });
+          return;
+        }
       }
 
       const [message] = await db

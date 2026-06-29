@@ -45,6 +45,8 @@ vi.mock('../lib/conversationCache.js', () => ({
 vi.mock('drizzle-orm', () => ({
   and: vi.fn((...args: unknown[]) => args),
   eq: vi.fn((col: unknown, val: unknown) => ({ col, val })),
+  ne: vi.fn((col: unknown, val: unknown) => ({ col, val, op: 'ne' })),
+  isNull: vi.fn((col: unknown) => ({ col, op: 'isNull' })),
   lt: vi.fn(),
   desc: vi.fn(),
   sql: vi.fn(),
