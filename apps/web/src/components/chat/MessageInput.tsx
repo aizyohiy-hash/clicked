@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import type { Socket } from "socket.io-client";
 import transferToken from "../../lib/soroban";
 
@@ -15,9 +15,35 @@ export default function MessageInput({ conversationId, recipient, socket }: Prop
   const [showPay, setShowPay] = useState(false);
   const [amount, setAmount] = useState<string>("");
   const [busy, setBusy] = useState(false);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isTypingRef = useRef(false);
+
+  function stopTyping() {
+    if (socket && conversationId && isTypingRef.current) {
+      isTypingRef.current = false;
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+      socket.emit("typing_stop", { conversationId });
+    }
+  }
+
+  function handleTextChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setText(e.target.value);
+    if (socket && conversationId) {
+      if (!isTypingRef.current) {
+        isTypingRef.current = true;
+        socket.emit("typing_start", { conversationId });
+      }
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = setTimeout(() => {
+        isTypingRef.current = false;
+        socket.emit("typing_stop", { conversationId });
+      }, 2000);
+    }
+  }
 
   function handleSendText() {
     if (!text.trim() || !socket) return;
+    stopTyping();
     socket.emit("send_message", {
       conversationId,
       content: text.trim(),
@@ -38,6 +64,7 @@ export default function MessageInput({ conversationId, recipient, socket }: Prop
     }
 
     setBusy(true);
+    stopTyping();
     try {
       const txHash = await transferToken(recipient, Math.floor(n));
       const transferMsg = {
@@ -75,7 +102,7 @@ export default function MessageInput({ conversationId, recipient, socket }: Prop
         className="flex-1 p-2 border rounded"
         placeholder="Type a message..."
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={handleTextChange}
         onKeyDown={(e) => {
           if (e.key === "Enter") handleSendText();
         }}

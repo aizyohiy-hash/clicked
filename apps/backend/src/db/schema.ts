@@ -9,6 +9,7 @@ import {
   integer,
   serial,
   uniqueIndex,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 
@@ -82,6 +83,14 @@ export const messages = pgTable('messages', {
   contentType: text('content_type').notNull().default('text/plain'),
   sequenceNumber: serial('sequence_number'),
   ciphertext: text('ciphertext'),
+  // Edits are stored as a brand-new message linked back to the message they
+  // replace (#190). Plaintext/ciphertext is never mutated in place; clients
+  // resolve a thread to the newest version sharing the same original id.
+  // Self-referential FK — `set null` so deleting an original doesn't cascade
+  // away its edits.
+  editsMessageId: uuid('edits_message_id').references((): AnyPgColumn => messages.id, {
+    onDelete: 'set null',
+  }),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   deletedAt: timestamp('deleted_at'),
 });
@@ -317,6 +326,15 @@ export const messagesRelations = relations(messages, ({ one, many }) => ({
     references: [userDevices.id],
   }),
   envelopes: many(messageEnvelopes),
+  // The original message this one edits (null for originals). Paired with
+  // `edits` below via a shared relation name so Drizzle can disambiguate the
+  // self-join (#190).
+  editsMessage: one(messages, {
+    fields: [messages.editsMessageId],
+    references: [messages.id],
+    relationName: 'message_edits',
+  }),
+  edits: many(messages, { relationName: 'message_edits' }),
 }));
 
 export const messageEnvelopesRelations = relations(messageEnvelopes, ({ one }) => ({
