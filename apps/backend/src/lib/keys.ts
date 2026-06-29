@@ -127,7 +127,12 @@ export function verifyEd25519Signature(
     const signatureBytes = Buffer.from(signatureB64, 'base64');
     // Ed25519 is a pure-signature scheme; Node's streaming createVerify does not
     // support it (throws "Invalid digest"). Use the one-shot crypto.verify() instead.
-    return cryptoVerify(null, payloadBytes, { key: identityKeyDer, format: 'der', type: 'spki' }, signatureBytes);
+    return cryptoVerify(
+      null,
+      payloadBytes,
+      { key: identityKeyDer, format: 'der', type: 'spki' },
+      signatureBytes,
+    );
   } catch {
     return false;
   }
