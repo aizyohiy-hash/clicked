@@ -313,6 +313,48 @@ impl GroupTreasuryContract {
             .expect("proposal not found")
     }
 
+    /// Returns a list of all proposals
+    pub fn list_proposals(env: Env) -> Vec<WithdrawProposal> {
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ProposalCount)
+            .unwrap_or(0);
+        let mut proposals: Vec<WithdrawProposal> = Vec::new(&env);
+        for id in 1..=count {
+            if let Some(proposal) = env
+                .storage()
+                .instance()
+                .get(&DataKey::Proposal(id))
+            {
+                proposals.push_back(proposal);
+            }
+        }
+        proposals
+    }
+
+    /// Returns a list of pending proposals
+    pub fn get_pending_proposals(env: Env) -> Vec<WithdrawProposal> {
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ProposalCount)
+            .unwrap_or(0);
+        let mut proposals: Vec<WithdrawProposal> = Vec::new(&env);
+        for id in 1..=count {
+            if let Some(proposal) = env
+                .storage()
+                .instance()
+                .get::<_, WithdrawProposal>(&DataKey::Proposal(id))
+            {
+                if proposal.status == ProposalStatus::Active {
+                    proposals.push_back(proposal);
+                }
+            }
+        }
+        proposals
+    }
+
     /// Shared validation for voting: authenticates the voter, confirms
     /// membership, loads the proposal, and ensures it is pending, not expired,
     /// and not already voted on by this address. Returns the loaded proposal.
@@ -332,7 +374,7 @@ impl GroupTreasuryContract {
         if proposal.status != ProposalStatus::Active {
             panic!("proposal is not pending");
         }
-        if env.ledger().timestamp() >= proposal.expires_at {
+        if proposal.status == ProposalStatus::Expired || env.ledger().timestamp() >= proposal.expires_at {
             panic!("proposal expired");
         }
         if env

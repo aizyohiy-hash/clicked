@@ -16,6 +16,7 @@ pub enum ProposalStatus {
     Passed,
     Rejected,
     Executed,
+    Expired,
 }
 
 #[contracttype]
@@ -69,6 +70,12 @@ pub struct ProposalFinalizedEvent {
     pub status: ProposalStatus,
     pub yes_votes: u32,
     pub no_votes: u32,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct ProposalExpiredEvent {
+    pub id: u64,
 }
 
 #[contracttype]

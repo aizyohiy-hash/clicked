@@ -313,6 +313,43 @@ fn create_with_past_expiry_panics() {
     );
 }
 
+#[test]
+#[should_panic(expected = "proposal not expired")]
+fn finalize_expired_before_expiry_panics() {
+    let env = Env::default();
+    let (client, _padmin, alice, _bob, _carol, _treasury, _tadmin, m, token_id) = setup(&env);
+
+    let id = create_proposal_in(&env, &client, &alice, 1_000, &m, &token_id, &alice, 1);
+    client.finalize_expired_proposal(&id);
+}
+
+#[test]
+#[should_panic(expected = "proposal not Pending")]
+fn finalize_expired_when_passed_panics() {
+    let env = Env::default();
+    let (client, _padmin, alice, _bob, _carol, _treasury, _tadmin, m, token_id) = setup(&env);
+
+    let id = create_proposal_in(&env, &client, &alice, 500, &m, &token_id, &alice, 1);
+    
+    advance_time(&env, 501);
+    client.finalize_proposal(&id); // becomes Passed
+    client.finalize_expired_proposal(&id);
+}
+
+#[test]
+fn finalize_expired_success() {
+    let env = Env::default();
+    let (client, _padmin, alice, _bob, _carol, _treasury, _tadmin, m, token_id) = setup(&env);
+
+    let id = create_proposal_in(&env, &client, &alice, 500, &m, &token_id, &alice, 1);
+    
+    advance_time(&env, 501);
+    client.finalize_expired_proposal(&id);
+    
+    let proposal = client.get_proposal(&id);
+    assert_eq!(proposal.status, ProposalStatus::Expired);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // execute_withdraw acceptance criteria
 

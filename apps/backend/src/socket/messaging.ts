@@ -1,11 +1,18 @@
 import type { Server } from 'socket.io';
-import { and, eq, lt, desc, sql } from 'drizzle-orm';
+import { and, eq, lt, desc, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { conversations, conversationMembers, messages, messageEnvelopes, userDevices } from '../db/schema.js';
+import {
+  conversations,
+  conversationMembers,
+  messages,
+  messageEnvelopes,
+  userDevices,
+} from '../db/schema.js';
 import type { AuthSocket } from '../middleware/socketAuth.js';
 import { invalidateConversationCaches } from '../lib/conversationCache.js';
 import { serializeMessage } from '../lib/messages.js';
 import { redis } from '../lib/redis.js';
+import { publishEphemeral, readMissedEvents } from '../services/resumeStream.js';
 
 const PAGE_SIZE = 30;
 
@@ -35,71 +42,105 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
   });
 
   // ── send_message ───────────────────────────────────────────────────────────
-  // Payload: { conversationId: string; content: string }
+  // Payload: { conversationId, messageId, contentType, ciphertext, envelopes }
   // Persists the message and broadcasts it to all room members.
-  socket.on('send_message', async (payload: { conversationId: string; content: string }) => {
-    const { conversationId, content } = payload;
+  socket.on(
+    'send_message',
+    async (payload: {
+      conversationId: string;
+      messageId: string;
+      contentType?: string;
+      ciphertext?: string;
+      envelopes?: Array<{ recipientDeviceId: string; ciphertext: string }>;
+    }) => {
+      const { conversationId, messageId, contentType, ciphertext, envelopes } = payload;
+      const deviceId = socket.auth!.deviceId;
 
-    if (!content?.trim()) {
-      socket.emit('error', { event: 'send_message', message: 'Content must not be empty' });
-      return;
-    }
+      if (!messageId) {
+        socket.emit('error', { event: 'send_message', message: 'messageId is required' });
+        return;
+      }
 
-    const membership = await db.query.conversationMembers.findFirst({
-      where: and(
-        eq(conversationMembers.conversationId, conversationId),
-        eq(conversationMembers.userId, userId),
-      ),
-    });
+      if (!ciphertext?.trim() && (!envelopes || envelopes.length === 0)) {
+        socket.emit('error', { event: 'send_message', message: 'Message content is empty' });
+        return;
+      }
 
-    if (!membership) {
-      socket.emit('error', { event: 'send_message', message: 'Not a member of this conversation' });
-      return;
-    }
+      const membership = await db.query.conversationMembers.findFirst({
+        where: and(
+          eq(conversationMembers.conversationId, conversationId),
+          eq(conversationMembers.userId, userId),
+        ),
+      });
 
-    // Get the user's primary device (or first active device)
-    const userDevice = await db.query.userDevices.findFirst({
-      where: and(eq(userDevices.userId, userId), eq(userDevices.revokedAt, null)),
-    });
+      if (!membership) {
+        socket.emit('error', {
+          event: 'send_message',
+          message: 'Not a member of this conversation',
+        });
+        return;
+      }
 
-    if (!userDevice) {
-      socket.emit('error', { event: 'send_message', message: 'No active device found' });
-      return;
-    }
+      // Idempotency check
+      const existing = await db.query.messages.findFirst({
+        where: eq(messages.id, messageId),
+        columns: { sequenceNumber: true },
+      });
 
-    const [message] = await db
-      .insert(messages)
-      .values({
-        conversationId,
-        senderId: userId,
-        senderDeviceId: userDevice.id,
-      })
-      .returning();
+      if (existing) {
+        socket.emit('message_ack', { messageId, sequenceNumber: existing.sequenceNumber });
+        return;
+      }
 
-    // Create the message envelope with the content
-    await db.insert(messageEnvelopes).values({
-      messageId: message.id,
-      content: content.trim(),
-    });
+      const [message] = await db
+        .insert(messages)
+        .values({
+          id: messageId,
+          conversationId,
+          senderId: userId,
+          senderDeviceId: deviceId,
+          contentType: contentType || 'text/plain',
+          ciphertext: ciphertext || null,
+        })
+        .returning();
 
-    // Fetch the complete message with envelopes
-    const completeMessage = await db.query.messages.findFirst({
-      where: eq(messages.id, message.id),
-      with: {
-        envelopes: true,
-        senderDevice: true,
-      },
-    });
+      if (envelopes && envelopes.length > 0) {
+        const deviceIds = envelopes.map((e) => e.recipientDeviceId);
+        const devicesList = await db.query.userDevices.findMany({
+          where: inArray(userDevices.id, deviceIds),
+          columns: { id: true, userId: true },
+        });
+        const deviceToUser = new Map(devicesList.map((d) => [d.id, d.userId]));
 
-    io.to(conversationId).emit('new_message', completeMessage);
+        const validEnvelopes = envelopes
+          .filter((env) => deviceToUser.has(env.recipientDeviceId))
+          .map((env) => ({
+            messageId,
+            recipientDeviceId: env.recipientDeviceId,
+            recipientUserId: deviceToUser.get(env.recipientDeviceId)!,
+            ciphertext: env.ciphertext,
+          }));
 
-    const members = await db.query.conversationMembers.findMany({
-      where: eq(conversationMembers.conversationId, conversationId),
-      columns: { userId: true },
-    });
+        if (validEnvelopes.length > 0) {
+          await db.insert(messageEnvelopes).values(validEnvelopes);
+        }
+      }
 
-    await invalidateConversationCaches(members.map((member) => member.userId));
-  });
+      // Emit acknowledgment to sender
+      if (message) {
+        socket.emit('message_ack', { messageId, sequenceNumber: message.sequenceNumber });
+      }
+
+      io.to(conversationId).emit('new_message', message);
+
+      const members = await db.query.conversationMembers.findMany({
+        where: eq(conversationMembers.conversationId, conversationId),
+        columns: { userId: true },
+      });
+
+      await invalidateConversationCaches(members.map((member) => member.userId));
+    },
+  );
 
   // ── message_history ────────────────────────────────────────────────────────
   // Payload: { conversationId: string; before?: string } (before = message id cursor)
@@ -149,6 +190,31 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
     });
   });
 
+  // ── delete_message ─────────────────────────────────────────────────────────
+  // Payload: { messageId: string }
+  // Sender retraction
+  socket.on('delete_message', async (payload: { messageId: string }) => {
+    const { messageId } = payload;
+    if (!messageId) return;
+
+    const message = await db.query.messages.findFirst({
+      where: eq(messages.id, messageId),
+    });
+
+    if (!message || message.senderId !== userId) {
+      socket.emit('error', { event: 'delete_message', message: 'Message not found or not sender' });
+      return;
+    }
+
+    await db
+      .update(messages)
+      .set({ deletedAt: new Date(), ciphertext: null })
+      .where(eq(messages.id, messageId));
+    await db.delete(messageEnvelopes).where(eq(messageEnvelopes.messageId, messageId));
+
+    io.to(message.conversationId).emit('message_deleted', { messageId });
+  });
+
   // ── message_read ───────────────────────────────────────────────────────────
   // Payload: { conversationId: string; lastReadMessageId: string }
   // Persists the caller's read position and broadcasts to the room.
@@ -195,9 +261,49 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
           ),
         );
 
-      io.to(conversationId).emit('read_receipt', { userId, lastReadMessageId });
+      io.to(conversationId).volatile.emit('read_receipt', { userId, lastReadMessageId });
+
+      // Persist this receipt to each member's resume stream so a member who is
+      // offline right now can replay it on reconnect. The receipt is ephemeral
+      // (Redis only) — the underlying messages are recovered via envelope sync.
+      // Skip the member lookup entirely when there is no stream to write to.
+      if (redis) {
+        const members = await db.query.conversationMembers.findMany({
+          where: eq(conversationMembers.conversationId, conversationId),
+          columns: { userId: true },
+        });
+        await publishEphemeral(
+          redis,
+          members.map((member) => member.userId),
+          { type: 'read_receipt', data: { conversationId, userId, lastReadMessageId } },
+        );
+      }
     },
   );
+
+  // ── resume ───────────────────────────────────────────────────────────────────
+  // Payload: { lastEventId?: string }
+  // On reconnect, replay the lightweight ephemeral events this device missed
+  // (receipts, presence, system notices) from its short-lived Redis stream, then
+  // tell the client to run a full envelope sync for durable messages — which live
+  // in Postgres and are intentionally never placed on the resume stream.
+  socket.on('resume', async (payload: { lastEventId?: string }) => {
+    if (!redis) {
+      // No replay backend available; the client must fall back to a full sync.
+      socket.emit('resume_complete', { lastEventId: null, syncRequired: true });
+      return;
+    }
+
+    const lastEventId = typeof payload?.lastEventId === 'string' ? payload.lastEventId : '';
+
+    const missed = await readMissedEvents(redis, userId, lastEventId);
+    for (const event of missed) {
+      socket.emit('ephemeral_replay', { id: event.id, type: event.type, data: event.data });
+    }
+
+    const newCursor = missed.length > 0 ? missed[missed.length - 1]!.id : lastEventId || null;
+    socket.emit('resume_complete', { lastEventId: newCursor, syncRequired: true });
+  });
 
   // ── create_conversation ────────────────────────────────────────────────────
   // Payload: { type: 'dm'|'group'; name?: string; memberIds: string[] }
@@ -246,7 +352,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       return;
     }
 
-    socket.to(conversationId).emit('typing_start', { conversationId, userId });
+    socket.to(conversationId).volatile.emit('typing_start', { conversationId, userId });
   });
 
   // ── typing_stop ─────────────────────────────────────────────────────────────
@@ -267,7 +373,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       return;
     }
 
-    socket.to(conversationId).emit('typing_stop', { conversationId, userId });
+    socket.to(conversationId).volatile.emit('typing_stop', { conversationId, userId });
   });
 
   // ── ask_assistant ──────────────────────────────────────────────────────────
@@ -369,26 +475,12 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
         .values({
           conversationId,
           senderId: ASSISTANT_USER_ID,
-          senderDeviceId: assistantDevice.id,
+          contentType: 'text/plain',
+          ciphertext: data.reply,
         })
         .returning();
 
-      // Create the message envelope with the content
-      await db.insert(messageEnvelopes).values({
-        messageId: replyMessage.id,
-        content: data.reply,
-      });
-
-      // Fetch the complete message with envelopes
-      const completeMessage = await db.query.messages.findFirst({
-        where: eq(messages.id, replyMessage.id),
-        with: {
-          envelopes: true,
-          senderDevice: true,
-        },
-      });
-
-      io.to(conversationId).emit('new_message', completeMessage);
+      io.to(conversationId).volatile.emit('new_message', replyMessage);
 
       const members = await db.query.conversationMembers.findMany({
         where: eq(conversationMembers.conversationId, conversationId),

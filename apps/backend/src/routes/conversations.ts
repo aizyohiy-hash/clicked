@@ -2,7 +2,13 @@ import { Router } from 'express';
 import type { IRouter } from 'express';
 import { asc, and, count, desc, eq, lt, sql, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { messageEnvelopes } from '../db/schema.js';
+import {
+  conversationMembers,
+  conversations,
+  messages,
+  tokenTransfers,
+  messageEnvelopes,
+} from '../db/schema.js';
 import { requireAuth, type AuthRequest } from '../middleware/auth.js';
 import { redis, CONV_CACHE_TTL, convCacheKey } from '../lib/redis.js';
 import { invalidateConversationCaches } from '../lib/conversationCache.js';
@@ -14,9 +20,7 @@ export const conversationsRouter: IRouter = Router();
 
 conversationsRouter.use(requireAuth);
 
-const SEARCH_RESULT_LIMIT = 20;
-
-const conversationRelations = {
+const getConversationRelations = (deviceId: string) => ({
   members: {
     with: {
       user: {
@@ -30,11 +34,13 @@ const conversationRelations = {
     limit: 1,
     with: {
       sender: { columns: { id: true, username: true, avatarUrl: true } },
-      envelopes: true,
-      senderDevice: true,
+      envelopes: {
+        where: eq(messageEnvelopes.recipientDeviceId, deviceId),
+        limit: 1,
+      },
     },
   },
-} as const;
+});
 
 type ConversationPayload = {
   messages?: Array<ReturnType<typeof serializeMessage>>;
@@ -44,7 +50,9 @@ type ConversationPayload = {
 function serializeConversation<T extends ConversationPayload>(conversation: T): T {
   return {
     ...conversation,
-    messages: (conversation.messages ?? []).map((message) => serializeMessage(message)),
+    messages: (conversation.messages ?? []).map((message) =>
+      serializeMessage(message as any),
+    ) as any,
   };
 }
 
@@ -97,9 +105,14 @@ conversationsRouter.get('/', async (req: AuthRequest, res) => {
       showArchived ? undefined : ne(conversationMembers.isArchived, true),
     ),
     with: {
-      conversation: conversationRelations as never,
+      conversation: getConversationRelations(req.auth!.deviceId) as never,
     },
-  })) as unknown as Array<{ conversationId: string; conversation: ConversationPayload }>;
+  })) as unknown as Array<{
+    conversationId: string;
+    isMuted: boolean;
+    isArchived: boolean;
+    conversation: ConversationPayload;
+  }>;
 
   // Single subquery for message counts — no N+1
   const conversationIds = memberships.map((m) => m.conversationId);
@@ -181,7 +194,7 @@ conversationsRouter.get('/:id', async (req: AuthRequest, res) => {
 
   const conversation = (await db.query.conversations.findFirst({
     where: eq(conversations.id, conversationId),
-    with: conversationRelations as never,
+    with: getConversationRelations(req.auth!.deviceId) as never,
   })) as ConversationPayload | undefined;
 
   if (!conversation) {
@@ -479,8 +492,10 @@ conversationsRouter.get('/:id/messages', async (req: AuthRequest, res) => {
     limit: limit + 1,
     with: {
       sender: { columns: { id: true, username: true, avatarUrl: true } },
-      envelopes: true,
-      senderDevice: true,
+      envelopes: {
+        where: eq(messageEnvelopes.recipientDeviceId, req.auth!.deviceId),
+        limit: 1,
+      },
     },
   });
 
@@ -496,67 +511,7 @@ conversationsRouter.get('/:id/messages', async (req: AuthRequest, res) => {
 });
 
 conversationsRouter.get('/:id/search', async (req: AuthRequest, res) => {
-  const userId = req.auth!.userId;
-  const conversationId = req.params['id'] as string | undefined;
-  const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
-
-  if (!conversationId) {
-    res.status(400).json({ error: 'Conversation id is required' });
-    return;
-  }
-
-  if (!query) {
-    res.status(400).json({ error: 'Search query is required' });
-    return;
-  }
-
-  const membership = await db.query.conversationMembers.findFirst({
-    where: and(
-      eq(conversationMembers.conversationId, conversationId),
-      eq(conversationMembers.userId, userId),
-    ),
-  });
-
-  if (!membership) {
-    res.status(403).json({ error: 'Not a member of this conversation' });
-    return;
-  }
-
-  const results = await db.execute<{
-    id: string;
-    conversationId: string;
-    senderId: string;
-    content: string;
-    createdAt: Date;
-    snippet: string;
-    rank: string;
-  }>(sql`
-    WITH search_query AS (
-      SELECT websearch_to_tsquery('english', ${query}) AS query
-    )
-    SELECT
-      ${messages.id} AS "id",
-      ${messages.conversationId} AS "conversationId",
-      ${messages.senderId} AS "senderId",
-      ${messageEnvelopes.content} AS "content",
-      ${messages.createdAt} AS "createdAt",
-      ts_headline(
-        'english',
-        ${messageEnvelopes.content},
-        search_query.query,
-        'StartSel=<mark>, StopSel=</mark>, MaxWords=24, MinWords=8, ShortWord=3, HighlightAll=false'
-      ) AS "snippet",
-      ts_rank_cd(to_tsvector('english', ${messageEnvelopes.content}), search_query.query) AS "rank"
-    FROM ${messages}
-    JOIN ${messageEnvelopes} ON ${messageEnvelopes.messageId} = ${messages.id}, search_query
-    WHERE ${messages.conversationId} = ${conversationId}
-      AND ${messages.deletedAt} IS NULL
-      AND search_query.query @@ to_tsvector('english', ${messageEnvelopes.content})
-    ORDER BY "rank" DESC, ${messages.createdAt} DESC
-    LIMIT ${SEARCH_RESULT_LIMIT}
-  `);
-
-  res.json({ results });
+  res.status(501).json({ error: 'Search is not supported in E2EE conversations' });
 });
 
 // PATCH /conversations/:id/settings — update muted/archived state for the authenticated user
