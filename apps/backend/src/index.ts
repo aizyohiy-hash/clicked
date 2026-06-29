@@ -146,8 +146,8 @@ io.on('connection', async (socket: AuthSocket) => {
   const presenceVisible = user?.presenceVisible ?? true;
 
   if (appRedis) {
-    await setOnline(appRedis, userId, socket.id);
-    if (presenceVisible) {
+    const becameOnline = await setOnline(appRedis, userId, deviceId);
+    if (becameOnline && presenceVisible) {
       for (const m of memberships) {
         io.to(m.conversationId).emit('user_online', { userId });
         io.to(m.conversationId).emit('presence_update', { userId, online: true });
@@ -173,7 +173,7 @@ io.on('connection', async (socket: AuthSocket) => {
     clearViolations(socket.id);
 
     if (appRedis) {
-      const fullyOffline = await setOffline(appRedis, userId, socket.id);
+      const fullyOffline = await setOffline(appRedis, userId, deviceId);
       if (fullyOffline) {
         const user = await db.query.users.findFirst({
           where: eq(users.id, userId),
