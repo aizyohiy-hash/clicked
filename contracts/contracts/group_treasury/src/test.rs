@@ -594,3 +594,87 @@ fn test_vote_without_auth_panics() {
 
     client.approve_withdraw(&member, &0);
 }
+
+// ── propose_withdraw Tests (#122) ─────────────────────────────────────────────
+
+#[test]
+fn test_propose_withdraw_returned_id_matches_stored() {
+    let env = Env::default();
+    let (contract_id, token_id, members) = voting_setup(&env, 1, 1);
+    let client = GroupTreasuryContractClient::new(&env, &contract_id);
+    let token = mock_token::MockTokenClient::new(&env, &token_id);
+    let member = members.get(0).unwrap();
+    token.mint(&member, &500_000);
+    client.deposit(&member, &token_id, &500_000);
+
+    let recipient = Address::generate(&env);
+    let id = client.propose_withdraw(&member, &recipient, &token_id, &100_000, &100);
+    let proposal = client.get_proposal(&id);
+
+    assert_eq!(id, proposal.id);
+}
+
+#[test]
+#[should_panic(expected = "proposer is not a member")]
+fn test_propose_withdraw_non_member_panics() {
+    let env = Env::default();
+    let (contract_id, token_id, _members) = voting_setup(&env, 1, 1);
+    let client = GroupTreasuryContractClient::new(&env, &contract_id);
+    let token = mock_token::MockTokenClient::new(&env, &token_id);
+    let outsider = Address::generate(&env);
+    token.mint(&outsider, &500_000);
+    client.deposit(&outsider, &token_id, &500_000);
+
+    let recipient = Address::generate(&env);
+    client.propose_withdraw(&outsider, &recipient, &token_id, &100_000, &100);
+}
+
+#[test]
+#[should_panic(expected = "insufficient funds")]
+fn test_propose_withdraw_insufficient_balance_panics() {
+    let env = Env::default();
+    let (contract_id, token_id, members) = voting_setup(&env, 1, 1);
+    let client = GroupTreasuryContractClient::new(&env, &contract_id);
+    let token = mock_token::MockTokenClient::new(&env, &token_id);
+    let member = members.get(0).unwrap();
+    token.mint(&member, &50_000);
+    client.deposit(&member, &token_id, &50_000);
+
+    let recipient = Address::generate(&env);
+    client.propose_withdraw(&member, &recipient, &token_id, &100_000, &100);
+}
+
+#[test]
+fn test_propose_withdraw_auto_adds_proposer_approval() {
+    let env = Env::default();
+    let (contract_id, token_id, members) = voting_setup(&env, 1, 1);
+    let client = GroupTreasuryContractClient::new(&env, &contract_id);
+    let token = mock_token::MockTokenClient::new(&env, &token_id);
+    let member = members.get(0).unwrap();
+    token.mint(&member, &500_000);
+    client.deposit(&member, &token_id, &500_000);
+
+    let recipient = Address::generate(&env);
+    let id = client.propose_withdraw(&member, &recipient, &token_id, &100_000, &100);
+    let proposal = client.get_proposal(&id);
+
+    assert_eq!(proposal.approvals, 1);
+}
+
+#[test]
+fn test_propose_withdraw_increments_proposal_id() {
+    let env = Env::default();
+    let (contract_id, token_id, members) = voting_setup(&env, 1, 1);
+    let client = GroupTreasuryContractClient::new(&env, &contract_id);
+    let token = mock_token::MockTokenClient::new(&env, &token_id);
+    let member = members.get(0).unwrap();
+    token.mint(&member, &500_000);
+    client.deposit(&member, &token_id, &500_000);
+
+    let recipient = Address::generate(&env);
+    let id0 = client.propose_withdraw(&member, &recipient, &token_id, &100_000, &100);
+    let id1 = client.propose_withdraw(&member, &recipient, &token_id, &100_000, &100);
+
+    assert_eq!(id0, 0);
+    assert_eq!(id1, 1);
+}

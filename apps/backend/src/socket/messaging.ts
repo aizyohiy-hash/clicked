@@ -12,6 +12,8 @@ import type { AuthSocket } from '../middleware/socketAuth.js';
 import { invalidateConversationCaches } from '../lib/conversationCache.js';
 import { serializeMessage } from '../lib/messages.js';
 import { redis } from '../lib/redis.js';
+import { deliverMessage } from '../services/deliveryPipeline.js';
+import { publishEphemeral, readMissedEvents } from '../services/resumeStream.js';
 
 const PAGE_SIZE = 30;
 
@@ -169,7 +171,130 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
         socket.emit('message_ack', { messageId, sequenceNumber: message.sequenceNumber });
       }
 
-      io.to(conversationId).emit('new_message', message);
+      // Deliver: storage is guaranteed above; pipeline re-validates membership,
+      // resolves active devices, and pushes each device exactly its envelope.
+      await deliverMessage(io, message, conversationId);
+
+      const members = await db.query.conversationMembers.findMany({
+        where: eq(conversationMembers.conversationId, conversationId),
+        columns: { userId: true },
+      });
+
+      await invalidateConversationCaches(members.map((member) => member.userId));
+    },
+  );
+
+  // ── edit_message ─────────────────────────────────────────────────────────────
+  // Payload: { originalMessageId, messageId, contentType?, ciphertext?, envelopes? }
+  // An edit is never an in-place plaintext mutation (#190). It is a brand-new
+  // message carrying fresh ciphertext + envelopes, linked back to the original
+  // via `editsMessageId`. Only the original sender may edit. We broadcast both
+  // `new_message` (so devices receive the new ciphertext to decrypt) and
+  // `message_edited` (so clients render the newest version with an "edited"
+  // marker and supersede the original).
+  socket.on(
+    'edit_message',
+    async (payload: {
+      originalMessageId: string;
+      messageId: string;
+      contentType?: string;
+      ciphertext?: string;
+      envelopes?: Array<{ recipientDeviceId: string; ciphertext: string }>;
+    }) => {
+      const { originalMessageId, messageId, contentType, ciphertext, envelopes } = payload;
+      const deviceId = socket.auth!.deviceId;
+
+      if (!originalMessageId || !messageId) {
+        socket.emit('error', {
+          event: 'edit_message',
+          message: 'originalMessageId and messageId are required',
+        });
+        return;
+      }
+
+      if (!ciphertext?.trim() && (!envelopes || envelopes.length === 0)) {
+        socket.emit('error', { event: 'edit_message', message: 'Message content is empty' });
+        return;
+      }
+
+      const original = await db.query.messages.findFirst({
+        where: eq(messages.id, originalMessageId),
+      });
+
+      if (!original) {
+        socket.emit('error', { event: 'edit_message', message: 'Original message not found' });
+        return;
+      }
+
+      // Edit authorship is restricted to the original sender.
+      if (original.senderId !== userId) {
+        socket.emit('error', {
+          event: 'edit_message',
+          message: 'Only the original sender can edit this message',
+        });
+        return;
+      }
+
+      // Always link to the root original so a chain of edits collapses to one
+      // logical message: editing an edit still points back to the first version.
+      const rootMessageId = original.editsMessageId ?? original.id;
+      const conversationId = original.conversationId;
+
+      // Idempotency: a retried edit with the same new messageId is a no-op.
+      const existing = await db.query.messages.findFirst({
+        where: eq(messages.id, messageId),
+        columns: { sequenceNumber: true },
+      });
+
+      if (existing) {
+        socket.emit('message_ack', { messageId, sequenceNumber: existing.sequenceNumber });
+        return;
+      }
+
+      const [message] = await db
+        .insert(messages)
+        .values({
+          id: messageId,
+          conversationId,
+          senderId: userId,
+          senderDeviceId: deviceId,
+          contentType: contentType || original.contentType,
+          ciphertext: ciphertext || null,
+          editsMessageId: rootMessageId,
+        })
+        .returning();
+
+      if (envelopes && envelopes.length > 0) {
+        const deviceIds = envelopes.map((e) => e.recipientDeviceId);
+        const devicesList = await db.query.userDevices.findMany({
+          where: inArray(userDevices.id, deviceIds),
+          columns: { id: true, userId: true },
+        });
+        const deviceToUser = new Map(devicesList.map((d) => [d.id, d.userId]));
+
+        const validEnvelopes = envelopes
+          .filter((env) => deviceToUser.has(env.recipientDeviceId))
+          .map((env) => ({
+            messageId,
+            recipientDeviceId: env.recipientDeviceId,
+            recipientUserId: deviceToUser.get(env.recipientDeviceId)!,
+            ciphertext: env.ciphertext,
+          }));
+
+        if (validEnvelopes.length > 0) {
+          await db.insert(messageEnvelopes).values(validEnvelopes);
+        }
+      }
+
+      if (message) {
+        socket.emit('message_ack', { messageId, sequenceNumber: message.sequenceNumber });
+        io.to(conversationId).emit('new_message', message);
+      }
+
+      io.to(conversationId).emit('message_edited', {
+        originalMessageId: rootMessageId,
+        newMessageId: messageId,
+      });
 
       const members = await db.query.conversationMembers.findMany({
         where: eq(conversationMembers.conversationId, conversationId),
@@ -296,8 +421,48 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
         );
 
       io.to(conversationId).volatile.emit('read_receipt', { userId, lastReadMessageId });
+
+      // Persist this receipt to each member's resume stream so a member who is
+      // offline right now can replay it on reconnect. The receipt is ephemeral
+      // (Redis only) — the underlying messages are recovered via envelope sync.
+      // Skip the member lookup entirely when there is no stream to write to.
+      if (redis) {
+        const members = await db.query.conversationMembers.findMany({
+          where: eq(conversationMembers.conversationId, conversationId),
+          columns: { userId: true },
+        });
+        await publishEphemeral(
+          redis,
+          members.map((member) => member.userId),
+          { type: 'read_receipt', data: { conversationId, userId, lastReadMessageId } },
+        );
+      }
     },
   );
+
+  // ── resume ───────────────────────────────────────────────────────────────────
+  // Payload: { lastEventId?: string }
+  // On reconnect, replay the lightweight ephemeral events this device missed
+  // (receipts, presence, system notices) from its short-lived Redis stream, then
+  // tell the client to run a full envelope sync for durable messages — which live
+  // in Postgres and are intentionally never placed on the resume stream.
+  socket.on('resume', async (payload: { lastEventId?: string }) => {
+    if (!redis) {
+      // No replay backend available; the client must fall back to a full sync.
+      socket.emit('resume_complete', { lastEventId: null, syncRequired: true });
+      return;
+    }
+
+    const lastEventId = typeof payload?.lastEventId === 'string' ? payload.lastEventId : '';
+
+    const missed = await readMissedEvents(redis, userId, lastEventId);
+    for (const event of missed) {
+      socket.emit('ephemeral_replay', { id: event.id, type: event.type, data: event.data });
+    }
+
+    const newCursor = missed.length > 0 ? missed[missed.length - 1]!.id : lastEventId || null;
+    socket.emit('resume_complete', { lastEventId: newCursor, syncRequired: true });
+  });
 
   // ── create_conversation ────────────────────────────────────────────────────
   // Payload: { type: 'dm'|'group'; name?: string; memberIds: string[] }

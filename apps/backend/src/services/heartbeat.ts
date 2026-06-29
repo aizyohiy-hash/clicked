@@ -26,7 +26,7 @@ export function startHeartbeatTimer(
       console.log(`Heartbeat timeout for device ${deviceId} (user ${userId})`);
 
       if (redis) {
-        await markDeviceOffline(redis, userId);
+        await markDeviceOffline(redis, userId, deviceId);
       }
 
       if (socket.connected) {
@@ -49,7 +49,7 @@ export function startHeartbeatTimer(
     timers.delete(socket.id);
 
     if (redis) {
-      await refreshPresence(redis, userId);
+      await refreshPresence(redis, userId, deviceId);
     }
 
     const now = Date.now();
