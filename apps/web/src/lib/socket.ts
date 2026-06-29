@@ -2,7 +2,10 @@ import { io, Socket } from 'socket.io-client';
 
 let socket: Socket | null = null;
 
-export function initSocket(token: string, serverUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001'): Socket {
+export function initSocket(
+  token: string,
+  serverUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001',
+): Socket {
   if (socket) return socket;
 
   socket = io(serverUrl, {

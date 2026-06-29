@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import React, { useState } from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useWallet } from "@/contexts/WalletContext";
+import React, { useState } from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useWallet } from '@/contexts/WalletContext';
 
 // Custom premium SVG Icons to avoid dependency weight
 const LogoIcon = () => (
@@ -108,12 +108,7 @@ const ProposalsIcon = () => (
 );
 
 const WalletIcon = () => (
-  <svg
-    className="w-5 h-5"
-    viewBox="0 0 24 24"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-  >
+  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path
       d="M20 12V8C20 5.79086 18.2091 4 16 4H4C2.89543 4 2 4.89543 2 6V18C2 19.1046 2.89543 20 4 20H16C18.2091 20 20 18.2091 20 16V14M22 12H18C16.8954 12 16 12.8954 16 14C16 15.1046 16.8954 16 18 16H22"
       stroke="currentColor"
@@ -137,14 +132,14 @@ const NavItem: React.FC<NavItemProps> = ({ href, label, icon, active }) => {
       href={href}
       className={`group relative flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 ${
         active
-          ? "bg-accent/15 text-white font-medium shadow-[0_0_15px_rgba(124,92,252,0.15)]"
-          : "text-foreground/60 hover:text-foreground hover:bg-white/5"
+          ? 'bg-accent/15 text-white font-medium shadow-[0_0_15px_rgba(124,92,252,0.15)]'
+          : 'text-foreground/60 hover:text-foreground hover:bg-white/5'
       }`}
     >
       {active && (
         <span className="absolute left-0 top-1/4 bottom-1/4 w-[4px] bg-accent rounded-r-md" />
       )}
-      <div className={active ? "text-accent" : "text-foreground/40 group-hover:text-foreground/75"}>
+      <div className={active ? 'text-accent' : 'text-foreground/40 group-hover:text-foreground/75'}>
         {icon}
       </div>
       <span className="hidden md:inline text-sm tracking-wide transition-opacity duration-300">
@@ -167,7 +162,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       try {
         await connect();
       } catch (err) {
-        console.error("Wallet connection failed:", err);
+        console.error('Wallet connection failed:', err);
       } finally {
         setIsConnecting(false);
       }
@@ -175,14 +170,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   };
 
   const navItems = [
-    { href: "/app/messages", label: "Messages", icon: <MessagesIcon /> },
-    { href: "/app/treasury", label: "Treasury", icon: <TreasuryIcon /> },
-    { href: "/app/proposals", label: "Proposals", icon: <ProposalsIcon /> },
+    { href: '/app/messages', label: 'Messages', icon: <MessagesIcon /> },
+    { href: '/app/treasury', label: 'Treasury', icon: <TreasuryIcon /> },
+    { href: '/app/proposals', label: 'Proposals', icon: <ProposalsIcon /> },
   ];
 
-  const displayAddress = publicKey
-    ? `${publicKey.slice(0, 4)}...${publicKey.slice(-4)}`
-    : "";
+  const displayAddress = publicKey ? `${publicKey.slice(0, 4)}...${publicKey.slice(-4)}` : '';
 
   return (
     <div className="flex min-h-screen bg-background text-foreground font-sans">
@@ -205,7 +198,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 href={item.href}
                 label={item.label}
                 icon={item.icon}
-                active={pathname === item.href || (item.href === "/app/messages" && pathname === "/app")} // default to messages if exactly /app
+                active={
+                  pathname === item.href || (item.href === '/app/messages' && pathname === '/app')
+                } // default to messages if exactly /app
               />
             ))}
           </nav>
@@ -243,7 +238,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           >
             <WalletIcon />
             <span className="hidden md:inline">
-              {isConnecting ? "Connecting..." : "Connect Wallet"}
+              {isConnecting ? 'Connecting...' : 'Connect Wallet'}
             </span>
           </button>
         )}
@@ -251,9 +246,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Main Content Area */}
       <div className="flex-1 pl-16 md:pl-[240px] transition-all duration-300 min-h-screen flex flex-col">
-        <main className="flex-1 p-4 md:p-8 max-w-7xl mx-auto w-full">
-          {children}
-        </main>
+        <main className="flex-1 p-4 md:p-8 max-w-7xl mx-auto w-full">{children}</main>
       </div>
     </div>
   );

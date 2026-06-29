@@ -27,6 +27,7 @@ import {
   clearViolations,
 } from './services/rateLimit.js';
 import { registerForBackpressure, unregisterForBackpressure } from './services/backpressure.js';
+import { getGatewaySubscriber } from './services/deviceDelivery.js';
 import {
   buildRpcFetcher,
   buildTreasuryRpcFetcher,
@@ -163,6 +164,19 @@ io.on('connection', async (socket: AuthSocket) => {
 
   registerMessagingHandlers(io, socket);
 
+  // Subscribe to the device delivery channel so cross-node per-device
+  // envelopes reach this socket (#192).
+  if (appRedis) {
+    const gatewaySub = getGatewaySubscriber(appRedis);
+    gatewaySub
+      .addDevice(deviceId, (payload) => {
+        socket.emit('device_envelope', payload);
+      })
+      .catch((err: Error) => {
+        console.warn('[deviceDelivery] failed to subscribe device', deviceId, err.message);
+      });
+  }
+
   // Monitor send-buffer to detect slow/stalled consumers.
   registerForBackpressure(socket);
 
@@ -170,6 +184,12 @@ io.on('connection', async (socket: AuthSocket) => {
     console.log('User disconnected:', userId);
     clearHeartbeatTimer(socket.id);
     unregisterDeviceSocket(socket.id);
+
+    // Unsubscribe from the device delivery channel on disconnect.
+    if (appRedis) {
+      const gatewaySub = getGatewaySubscriber(appRedis);
+      gatewaySub.removeDevice(deviceId).catch(() => {});
+    }
     unregisterForBackpressure(socket);
     clearViolations(socket.id);
 

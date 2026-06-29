@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import React, { useState } from "react";
+import React, { useState } from 'react';
 
 interface Message {
   id: string;
@@ -19,37 +19,37 @@ interface Message {
 export default function MessagesPage() {
   const [messages, setMessages] = useState<Message[]>([
     {
-      id: "1",
-      sender: "Jed McCaleb",
-      avatar: "J",
-      text: "Hey! Did you check out the new stellar-core upgrade? The transaction speeds are looking incredibly solid.",
-      timestamp: "10:24 AM",
+      id: '1',
+      sender: 'Jed McCaleb',
+      avatar: 'J',
+      text: 'Hey! Did you check out the new stellar-core upgrade? The transaction speeds are looking incredibly solid.',
+      timestamp: '10:24 AM',
       isSelf: false,
     },
     {
-      id: "2",
-      sender: "You",
-      avatar: "Y",
-      text: "Yes! The ledger close times are consistently under 4 seconds now. Just sent some test transactions.",
-      timestamp: "10:26 AM",
+      id: '2',
+      sender: 'You',
+      avatar: 'Y',
+      text: 'Yes! The ledger close times are consistently under 4 seconds now. Just sent some test transactions.',
+      timestamp: '10:26 AM',
       isSelf: true,
     },
     {
-      id: "3",
-      sender: "Jed McCaleb",
-      avatar: "J",
+      id: '3',
+      sender: 'Jed McCaleb',
+      avatar: 'J',
       text: "Awesome. I've sent you the 50 XLM for the contract review. Let me know when you receive it.",
-      timestamp: "10:27 AM",
+      timestamp: '10:27 AM',
       isSelf: false,
       tokenTransfer: {
-        amount: "50 XLM",
-        token: "Stellar Lumens",
-        txHash: "0x78ab...e912",
+        amount: '50 XLM',
+        token: 'Stellar Lumens',
+        txHash: '0x78ab...e912',
       },
     },
   ]);
 
-  const [inputText, setInputText] = useState("");
+  const [inputText, setInputText] = useState('');
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,15 +57,15 @@ export default function MessagesPage() {
 
     const newMessage: Message = {
       id: Date.now().toString(),
-      sender: "You",
-      avatar: "Y",
+      sender: 'You',
+      avatar: 'Y',
       text: inputText,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       isSelf: true,
     };
 
     setMessages([...messages, newMessage]);
-    setInputText("");
+    setInputText('');
   };
 
   return (
@@ -88,7 +88,12 @@ export default function MessagesPage() {
           {/* Quick Pay Action Button */}
           <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-accent/10 hover:bg-accent/20 text-accent-light text-xs font-semibold transition-all duration-300">
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2.5}
+                d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
             </svg>
             Send XLM
           </button>
@@ -101,7 +106,7 @@ export default function MessagesPage() {
           <div
             key={msg.id}
             className={`flex items-end gap-3.5 max-w-[85%] md:max-w-[70%] ${
-              msg.isSelf ? "ml-auto flex-row-reverse" : ""
+              msg.isSelf ? 'ml-auto flex-row-reverse' : ''
             }`}
           >
             {/* Avatar */}
@@ -109,8 +114,8 @@ export default function MessagesPage() {
               <div
                 className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${
                   msg.isSelf
-                    ? "bg-white/10 text-white"
-                    : "bg-gradient-to-tr from-accent to-accent-light text-white"
+                    ? 'bg-white/10 text-white'
+                    : 'bg-gradient-to-tr from-accent to-accent-light text-white'
                 }`}
               >
                 {msg.avatar}
@@ -122,8 +127,8 @@ export default function MessagesPage() {
               <div
                 className={`px-4 py-3 rounded-2xl text-sm leading-relaxed shadow-sm ${
                   msg.isSelf
-                    ? "bg-accent text-white rounded-br-none"
-                    : "bg-[#1e1e2f] text-foreground/90 rounded-bl-none border border-white/[0.03]"
+                    ? 'bg-accent text-white rounded-br-none'
+                    : 'bg-[#1e1e2f] text-foreground/90 rounded-bl-none border border-white/[0.03]'
                 }`}
               >
                 {msg.text}
@@ -133,12 +138,24 @@ export default function MessagesPage() {
                   <div className="mt-3 p-3 rounded-xl bg-black/20 border border-white/5 flex items-center justify-between gap-4">
                     <div className="flex items-center gap-2">
                       <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2.5}
+                            d="M5 13l4 4L19 7"
+                          />
                         </svg>
                       </div>
                       <div>
-                        <p className="text-xs font-semibold text-emerald-400">Received {msg.tokenTransfer.amount}</p>
+                        <p className="text-xs font-semibold text-emerald-400">
+                          Received {msg.tokenTransfer.amount}
+                        </p>
                         <p className="text-[10px] text-white/40">{msg.tokenTransfer.token}</p>
                       </div>
                     </div>
@@ -149,9 +166,7 @@ export default function MessagesPage() {
                 )}
               </div>
               <span
-                className={`text-[10px] text-foreground/30 px-1 ${
-                  msg.isSelf ? "text-right" : ""
-                }`}
+                className={`text-[10px] text-foreground/30 px-1 ${msg.isSelf ? 'text-right' : ''}`}
               >
                 {msg.timestamp}
               </span>
@@ -161,7 +176,10 @@ export default function MessagesPage() {
       </div>
 
       {/* Input Form */}
-      <form onSubmit={handleSendMessage} className="p-4 bg-card/40 border-t border-border flex items-center gap-3">
+      <form
+        onSubmit={handleSendMessage}
+        className="p-4 bg-card/40 border-t border-border flex items-center gap-3"
+      >
         <input
           type="text"
           value={inputText}
@@ -173,8 +191,18 @@ export default function MessagesPage() {
           type="submit"
           className="p-3.5 rounded-2xl bg-accent hover:bg-accent-light text-white font-medium shadow-md shadow-accent/20 transition-all duration-300 hover:scale-105 active:scale-95"
         >
-          <svg className="w-5 h-5 transform rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+          <svg
+            className="w-5 h-5 transform rotate-90"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2.5}
+              d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+            />
           </svg>
         </button>
       </form>
