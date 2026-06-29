@@ -168,15 +168,21 @@ describe('MlsKeyPackageSchema', () => {
 
 describe('PreKeyEntrySchema', () => {
   it('accepts a valid entry', () => {
-    expect(PreKeyEntrySchema.safeParse({ keyId: 1, publicKey: b64OfLength(32) }).success).toBe(true);
+    expect(PreKeyEntrySchema.safeParse({ keyId: 1, publicKey: b64OfLength(32) }).success).toBe(
+      true,
+    );
   });
 
   it('rejects negative keyId', () => {
-    expect(PreKeyEntrySchema.safeParse({ keyId: -1, publicKey: b64OfLength(32) }).success).toBe(false);
+    expect(PreKeyEntrySchema.safeParse({ keyId: -1, publicKey: b64OfLength(32) }).success).toBe(
+      false,
+    );
   });
 
   it('rejects wrong-length publicKey', () => {
-    expect(PreKeyEntrySchema.safeParse({ keyId: 0, publicKey: b64OfLength(16) }).success).toBe(false);
+    expect(PreKeyEntrySchema.safeParse({ keyId: 0, publicKey: b64OfLength(16) }).success).toBe(
+      false,
+    );
   });
 });
 
@@ -190,12 +196,15 @@ describe('SignedPreKeyEntrySchema', () => {
   });
 
   it('rejects missing signature', () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { signature: _, ...noSig } = valid;
     expect(SignedPreKeyEntrySchema.safeParse(noSig).success).toBe(false);
   });
 
   it('rejects wrong-length signature', () => {
-    expect(SignedPreKeyEntrySchema.safeParse({ ...valid, signature: b64OfLength(32) }).success).toBe(false);
+    expect(
+      SignedPreKeyEntrySchema.safeParse({ ...valid, signature: b64OfLength(32) }).success,
+    ).toBe(false);
   });
 
   it('rejects non-base64 signature', () => {
@@ -203,7 +212,9 @@ describe('SignedPreKeyEntrySchema', () => {
   });
 
   it('rejects wrong-length publicKey', () => {
-    expect(SignedPreKeyEntrySchema.safeParse({ ...valid, publicKey: b64OfLength(44) }).success).toBe(false);
+    expect(
+      SignedPreKeyEntrySchema.safeParse({ ...valid, publicKey: b64OfLength(44) }).success,
+    ).toBe(false);
   });
 });
 
@@ -211,14 +222,12 @@ describe('SignedPreKeyEntrySchema', () => {
 
 describe('verifyEd25519Signature', () => {
   it('returns true for a valid signature', async () => {
-    const { generateKeyPairSync, createSign } = await import('node:crypto');
+    const { generateKeyPairSync, sign } = await import('node:crypto');
     const { privateKey, publicKey } = generateKeyPairSync('ed25519');
     const spkiB64 = publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
     const payload = Buffer.from('test-prekey-bytes');
     const payloadB64 = payload.toString('base64');
-    const signer = createSign('Ed25519');
-    signer.update(payload);
-    const sigB64 = signer.sign(privateKey).toString('base64');
+    const sigB64 = sign(null, payload, privateKey).toString('base64');
     expect(verifyEd25519Signature(spkiB64, payloadB64, sigB64)).toBe(true);
   });
 
