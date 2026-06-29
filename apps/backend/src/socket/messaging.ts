@@ -1,4 +1,5 @@
 import type { Server } from 'socket.io';
+import { createHash } from 'node:crypto';
 import { and, eq, lt, desc, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
@@ -12,6 +13,7 @@ import type { AuthSocket } from '../middleware/socketAuth.js';
 import { invalidateConversationCaches } from '../lib/conversationCache.js';
 import { serializeMessage } from '../lib/messages.js';
 import { redis } from '../lib/redis.js';
+import { sendPushForMessage } from '../services/push.js';
 
 const PAGE_SIZE = 30;
 
@@ -41,8 +43,13 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
   });
 
   // ── send_message ───────────────────────────────────────────────────────────
-  // Payload: { conversationId, messageId, contentType, ciphertext, envelopes }
+  // Payload: { conversationId, messageId, contentType, ciphertext, envelopes, ciphertextSha256? }
   // Persists the message and broadcasts it to all room members.
+  //
+  // Integrity: when `ciphertextSha256` is present the server computes
+  // SHA-256 over the stored ciphertext and rejects the message on mismatch.
+  // This is a transport-corruption check; the AEAD tag inside the ciphertext
+  // remains the primary integrity mechanism for clients at decryption time.
   socket.on(
     'send_message',
     async (payload: {
@@ -50,9 +57,11 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       messageId: string;
       contentType?: string;
       ciphertext?: string;
+      ciphertextSha256?: string;
       envelopes?: Array<{ recipientDeviceId: string; ciphertext: string }>;
     }) => {
-      const { conversationId, messageId, contentType, ciphertext, envelopes } = payload;
+      const { conversationId, messageId, contentType, ciphertext, ciphertextSha256, envelopes } =
+        payload;
       const deviceId = socket.auth!.deviceId;
 
       if (!messageId) {
@@ -89,6 +98,18 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       if (existing) {
         socket.emit('message_ack', { messageId, sequenceNumber: existing.sequenceNumber });
         return;
+      }
+
+      // Verify ciphertext integrity when a sha256 is provided.
+      if (ciphertextSha256 && ciphertext) {
+        const computed = createHash('sha256').update(ciphertext, 'utf8').digest('hex');
+        if (computed !== ciphertextSha256) {
+          socket.emit('error', {
+            event: 'integrity_error',
+            message: 'Ciphertext sha256 mismatch',
+          });
+          return;
+        }
       }
 
       const [message] = await db
@@ -132,12 +153,37 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
 
       io.to(conversationId).emit('new_message', message);
 
+      // Emit a file_message event for file-type content so recipients
+      // know to fetch file bytes via GET /files/:id over HTTP.
+      const ct = contentType || 'text/plain';
+      if (
+        ct.startsWith('file/') ||
+        ct === 'file' ||
+        ct.startsWith('image/') ||
+        ct.startsWith('video/') ||
+        ct.startsWith('audio/')
+      ) {
+        io.to(conversationId).emit('file_message', {
+          messageId,
+          conversationId,
+          fileId: messageId,
+        });
+      }
+
       const members = await db.query.conversationMembers.findMany({
         where: eq(conversationMembers.conversationId, conversationId),
         columns: { userId: true },
       });
 
       await invalidateConversationCaches(members.map((member) => member.userId));
+
+      // Dispatch push notifications to offline members who
+      // haven't muted the conversation and have push enabled.
+      sendPushForMessage({
+        conversationId,
+        messageId,
+        senderId: userId,
+      });
     },
   );
 

@@ -2,8 +2,8 @@ import type { Server } from 'socket.io';
 import type { Redis } from 'ioredis';
 import type { AuthSocket } from '../middleware/socketAuth.js';
 import { db } from '../db/index.js';
-import { devices } from '../db/schema.js';
-import { eq } from 'drizzle-orm';
+import { devices, userDevices } from '../db/schema.js';
+import { eq, and, isNull } from 'drizzle-orm';
 import { refreshPresence, markDeviceOffline } from './presence.js';
 
 const HEARTBEAT_TIMEOUT_MS = 90_000;
@@ -18,6 +18,7 @@ export function startHeartbeatTimer(
   deviceId: string,
   redis: Redis | null,
   io: Server,
+  identityPublicKey?: string,
 ): void {
   const schedule = () => {
     clearTimeout(timers.get(socket.id));
@@ -60,6 +61,24 @@ export function startHeartbeatTimer(
         await db.update(devices).set({ updatedAt: new Date() }).where(eq(devices.id, deviceId));
       } catch {
         // Non-critical update; ignore errors.
+      }
+
+      // Update user_devices.lastSeenAt for device-based presence derivation.
+      if (identityPublicKey) {
+        try {
+          await db
+            .update(userDevices)
+            .set({ lastSeenAt: new Date() })
+            .where(
+              and(
+                eq(userDevices.userId, userId),
+                eq(userDevices.identityPublicKey, identityPublicKey),
+                isNull(userDevices.revokedAt),
+              ),
+            );
+        } catch {
+          // Non-critical update; ignore errors.
+        }
       }
     }
 

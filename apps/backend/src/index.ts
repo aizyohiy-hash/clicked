@@ -3,15 +3,15 @@ import { Server } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { createClient } from 'redis';
 import dotenv from 'dotenv';
-import { eq } from 'drizzle-orm';
+import { eq, isNull, and } from 'drizzle-orm';
 import { db } from './db/index.js';
-import { conversationMembers, users } from './db/schema.js';
+import { conversationMembers, users, userDevices } from './db/schema.js';
 import { socketAuthMiddleware, type AuthSocket } from './middleware/socketAuth.js';
 import { registerMessagingHandlers } from './socket/messaging.js';
 import { app } from './app.js';
 import { redis as appRedis } from './lib/redis.js';
 import { setSocketServer } from './lib/socket.js';
-import { setOnline, setOffline } from './services/presence.js';
+import { setOnline, setOffline, deriveDevicePresence } from './services/presence.js';
 import { startHeartbeatTimer, clearHeartbeatTimer } from './services/heartbeat.js';
 import {
   registerDeviceSocket,
@@ -51,6 +51,7 @@ io.use(socketAuthMiddleware);
 io.on('connection', async (socket: AuthSocket) => {
   const userId = socket.auth!.userId;
   const deviceId = socket.auth!.deviceId;
+  const identityPublicKey = socket.identityPublicKey;
   console.log('User connected:', userId, socket.id);
 
   // Register socket for device-revocation tracking (cross-instance via Redis pub/sub).
@@ -59,7 +60,25 @@ io.on('connection', async (socket: AuthSocket) => {
   }
 
   // Start the server-side heartbeat watchdog (90 s timeout).
-  startHeartbeatTimer(socket, userId, deviceId, appRedis, io);
+  startHeartbeatTimer(socket, userId, deviceId, appRedis, io, identityPublicKey);
+
+  // Update user_devices.lastSeenAt for device-based presence derivation.
+  if (identityPublicKey) {
+    try {
+      await db
+        .update(userDevices)
+        .set({ lastSeenAt: new Date() })
+        .where(
+          and(
+            eq(userDevices.userId, userId),
+            eq(userDevices.identityPublicKey, identityPublicKey),
+            isNull(userDevices.revokedAt),
+          ),
+        );
+    } catch {
+      // Non-critical update; ignore errors.
+    }
+  }
 
   // Per-socket middleware: intercept every incoming event before handlers.
   const EXCLUDED_EVENTS = new Set(['heartbeat']);
@@ -139,6 +158,24 @@ io.on('connection', async (socket: AuthSocket) => {
     unregisterForBackpressure(socket);
     clearViolations(socket.id);
 
+    // Update user_devices.lastSeenAt on disconnect.
+    if (identityPublicKey) {
+      try {
+        await db
+          .update(userDevices)
+          .set({ lastSeenAt: new Date() })
+          .where(
+            and(
+              eq(userDevices.userId, userId),
+              eq(userDevices.identityPublicKey, identityPublicKey),
+              isNull(userDevices.revokedAt),
+            ),
+          );
+      } catch {
+        // Non-critical update; ignore errors.
+      }
+    }
+
     if (appRedis) {
       const fullyOffline = await setOffline(appRedis, userId, socket.id);
       if (fullyOffline) {
@@ -153,9 +190,16 @@ io.on('connection', async (socket: AuthSocket) => {
             where: eq(conversationMembers.userId, userId),
             columns: { conversationId: true },
           });
+
+          const { lastSeen } = await deriveDevicePresence(userId);
+
           for (const m of memberships) {
             io.to(m.conversationId).emit('user_offline', { userId });
-            io.to(m.conversationId).emit('presence_update', { userId, online: false });
+            io.to(m.conversationId).emit('presence_update', {
+              userId,
+              online: false,
+              ...(lastSeen ? { lastSeen } : {}),
+            });
           }
         }
       }

@@ -8,9 +8,16 @@
  * - On connect:   add socketId to `presence:{userId}` set, set TTL 60s
  * - On heartbeat: refresh TTL to 60s
  * - On disconnect: remove socketId from set, if set empty → user_offline
- * - GET /users/:id/presence → { online: boolean }
+ * - GET /users/:id/presence → { online: boolean, lastSeen?: string }
+ *
+ * User presence is derived from device presence: a user is online when any
+ * non-expired device entry exists (Redis OR user_devices.lastSeenAt within
+ * the window). When offline, lastSeen reflects the most recent device activity.
  */
 import type { Redis } from 'ioredis';
+import { isNull, eq, and, gte, desc } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { userDevices } from '../db/schema.js';
 
 const PRESENCE_TTL = 90; // seconds
 
@@ -70,4 +77,41 @@ export async function isOnline(redis: Redis, userId: string): Promise<boolean> {
   const key = presenceKey(userId);
   const count = await redis.scard(key);
   return count > 0;
+}
+
+const DEVICE_PRESENCE_WINDOW_MS = 90_000;
+
+/**
+ * Derive user presence from device presence: a user is considered online
+ * if any non-revoked device has a lastSeenAt within the presence window.
+ * When offline, returns the most recent lastSeenAt across all devices.
+ */
+export async function deriveDevicePresence(
+  userId: string,
+): Promise<{ online: boolean; lastSeen: string | null }> {
+  const windowStart = new Date(Date.now() - DEVICE_PRESENCE_WINDOW_MS);
+
+  const activeDevice = await db.query.userDevices.findFirst({
+    where: and(
+      eq(userDevices.userId, userId),
+      isNull(userDevices.revokedAt),
+      gte(userDevices.lastSeenAt, windowStart),
+    ),
+    columns: { id: true },
+  });
+
+  if (activeDevice) {
+    return { online: true, lastSeen: null };
+  }
+
+  const mostRecent = await db.query.userDevices.findFirst({
+    where: and(eq(userDevices.userId, userId), isNull(userDevices.revokedAt)),
+    orderBy: desc(userDevices.lastSeenAt),
+    columns: { lastSeenAt: true },
+  });
+
+  return {
+    online: false,
+    lastSeen: mostRecent?.lastSeenAt?.toISOString() ?? null,
+  };
 }

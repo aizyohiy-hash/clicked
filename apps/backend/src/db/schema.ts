@@ -214,6 +214,7 @@ export const userDevices = pgTable(
     identityPublicKey: text('identity_public_key').notNull(),
     registrationId: integer('registration_id'),
     lastSeenAt: timestamp('last_seen_at'),
+    pushEnabled: boolean('push_enabled').notNull().default(true),
     revokedAt: timestamp('revoked_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
