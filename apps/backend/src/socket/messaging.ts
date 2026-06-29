@@ -160,8 +160,6 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
         })
         .returning();
 
-      let recipientDeviceIds: string[] = [];
-
       if (envelopes && envelopes.length > 0) {
         const deviceIds = envelopes.map((e) => e.recipientDeviceId);
 
@@ -184,8 +182,6 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
         if (validEnvelopes.length > 0) {
           await db.insert(messageEnvelopes).values(validEnvelopes);
         }
-
-        recipientDeviceIds = validEnvelopes.map((e) => e.recipientDeviceId);
       }
 
       if (message) {
@@ -275,6 +271,8 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
         })
         .returning();
 
+      let recipientDeviceIds: string[] = [];
+
       if (envelopes && envelopes.length > 0) {
         const deviceIds = envelopes.map((e) => e.recipientDeviceId);
 
@@ -297,6 +295,8 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
         if (validEnvelopes.length > 0) {
           await db.insert(messageEnvelopes).values(validEnvelopes);
         }
+
+        recipientDeviceIds = validEnvelopes.map((e) => e.recipientDeviceId);
       }
 
       if (message) {
