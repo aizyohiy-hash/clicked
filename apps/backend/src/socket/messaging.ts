@@ -636,7 +636,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       const response = await fetch('http://localhost:8000/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: content, conversation_id: conversationId }),
+        body: JSON.stringify({ message: ciphertext, conversation_id: conversationId }),
       });
 
       if (!response.ok) {

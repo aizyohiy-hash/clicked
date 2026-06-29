@@ -62,7 +62,7 @@ vi.mock('../db/schema.js', () => ({
     id: 'id',
     conversationId: 'conversationId',
     senderId: 'senderId',
-    content: 'content',
+    ciphertext: 'ciphertext',
     createdAt: 'createdAt',
     deletedAt: 'deletedAt',
   },
