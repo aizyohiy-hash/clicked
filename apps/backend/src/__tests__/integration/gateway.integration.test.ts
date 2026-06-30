@@ -45,6 +45,7 @@ vi.mock('../../db/index.js', () => ({
     update: vi.fn(),
     delete: vi.fn(),
     execute: vi.fn(),
+    select: vi.fn(),
   },
 }));
 
@@ -61,6 +62,8 @@ vi.mock('../../db/schema.js', () => ({
 vi.mock('drizzle-orm', () => ({
   and: vi.fn((...args: unknown[]) => args),
   eq: vi.fn(),
+  ne: vi.fn(),
+  isNull: vi.fn(),
   lt: vi.fn(),
   desc: vi.fn(),
   sql: vi.fn(),
@@ -289,6 +292,18 @@ describe('Gateway integration — issue #215', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+
+    // Set up db.select chain for deliverMessage (deliveryPipeline.ts).
+    // deliverMessage queries members then activeDevices via db.select().from().where().
+    // Returning non-empty members + empty activeDevices causes it to call
+    // io.to(conversationId).emit('new_message', message) — the path tests expect.
+    const mockWhere = vi
+      .fn()
+      .mockResolvedValueOnce([{ userId: ALICE.userId }]) // members query
+      .mockResolvedValue([]); // activeDevices query → triggers new_message emit
+    vi.mocked(db.select).mockReturnValue({
+      from: vi.fn().mockReturnValue({ where: mockWhere }),
+    } as never);
 
     // Flush all keys written by this suite so tests are hermetically isolated.
     const patterns = [
