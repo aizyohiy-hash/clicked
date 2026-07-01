@@ -17,9 +17,11 @@ import { EventEmitter } from 'events';
 
 // ── Mock DB ─────────────────────────────────────────────────────────────────
 
-const mockFindFirst = vi.fn();
-const mockFindMany = vi.fn();
-const mockUpdate = vi.fn();
+const { mockFindFirst, mockFindMany, mockUpdate } = vi.hoisted(() => ({
+  mockFindFirst: vi.fn(),
+  mockFindMany: vi.fn(),
+  mockUpdate: vi.fn(),
+}));
 
 vi.mock('../db/index.js', () => ({
   db: {
