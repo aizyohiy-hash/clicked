@@ -145,6 +145,11 @@ export async function refreshPresence(
   const hashKey = presenceHashKey(userId);
   const deviceKey = presenceDeviceKey(userId, deviceId);
 
+  const exists = (await redis.hlen(hashKey)) > 0;
+  if (!exists) {
+    return;
+  }
+
   await redis.hset(hashKey, { [deviceId]: lastSeen });
   await redis.hset(deviceKey, { lastSeen });
   await redis.expire(deviceKey, PRESENCE_TTL);
