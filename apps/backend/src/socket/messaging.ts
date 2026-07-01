@@ -66,13 +66,22 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
 
   // ── send_message ───────────────────────────────────────────────────────────
   dispatcher.register('send_message', async (payload) => {
-    const { conversationId, messageId, content, contentType, ciphertext, envelopes } = payload as {
+    const {
+      conversationId,
+      messageId,
+      content,
+      contentType,
+      ciphertext,
+      envelopes,
+      fileId: payloadFileId,
+    } = payload as {
       conversationId: string;
       messageId?: string;
       content?: string;
       contentType?: string;
       ciphertext?: string;
       envelopes?: Array<{ recipientDeviceId: string; ciphertext: string }>;
+      fileId?: string;
     };
     const deviceId = socket.auth!.deviceId;
 
@@ -103,7 +112,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       contentType,
       ciphertext: effectiveCiphertext,
       envelopes,
-      fileId,
+      fileId: payloadFileId,
     });
     if (!validation.ok) {
       socket.emit('error', {
@@ -136,7 +145,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       return;
     }
 
-    let fileId: string | undefined;
+    let fileId: string | undefined = payloadFileId;
     const resolvedContentType = contentType || 'text/plain';
     if (FILE_CONTENT_TYPES.has(resolvedContentType)) {
       const [fileRow] = await db
@@ -144,7 +153,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
         .values({ storageKey: messageId })
         .onConflictDoUpdate({ target: files.storageKey, set: { storageKey: messageId } })
         .returning({ id: files.id });
-      fileId = fileRow?.id;
+      fileId = fileRow?.id ?? payloadFileId;
     }
 
     const [message] = await db
@@ -197,9 +206,12 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       }
     }
 
-    if (message) {
-      socket.emit('message_ack', { messageId, sequenceNumber: message.sequenceNumber });
+    if (!message) {
+      socket.emit('error', { event: 'send_message', message: 'Failed to persist message' });
+      return;
     }
+
+    socket.emit('message_ack', { messageId, sequenceNumber: message.sequenceNumber });
 
     await deliverMessage(io, message, conversationId);
 

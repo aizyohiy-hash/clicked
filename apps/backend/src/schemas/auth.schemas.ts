@@ -22,6 +22,9 @@ export const VerifySchema = z.object({
    * Validated for correct base64 and exact byte length before any crypto operation.
    */
   identityPublicKey: IdentityPublicKeySchema,
+  deviceName: z.string().min(1).max(100).optional(),
+  platform: z.enum(['web', 'ios', 'android']).optional(),
+  registrationId: z.number().int().nonnegative().optional(),
 });
 
 export type ChallengeBody = z.infer<typeof ChallengeSchema>;
