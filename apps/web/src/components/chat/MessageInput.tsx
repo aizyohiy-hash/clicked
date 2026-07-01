@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import React, { useState } from "react";
-import type { Socket } from "socket.io-client";
-import transferToken from "../../lib/soroban";
+import React, { useState } from 'react';
+import type { Socket } from 'socket.io-client';
+import transferToken from '../../lib/soroban';
 
 type Props = {
   conversationId: string;
@@ -11,29 +11,29 @@ type Props = {
 };
 
 export default function MessageInput({ conversationId, recipient, socket }: Props) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState('');
   const [showPay, setShowPay] = useState(false);
-  const [amount, setAmount] = useState<string>("");
+  const [amount, setAmount] = useState<string>('');
   const [busy, setBusy] = useState(false);
 
   function handleSendText() {
     if (!text.trim() || !socket) return;
-    socket.emit("send_message", {
+    socket.emit('send_message', {
       conversationId,
       content: text.trim(),
     });
-    setText("");
+    setText('');
   }
 
   async function handleConfirmTransfer() {
     const n = Number(amount);
     if (!n || n <= 0) {
-      alert("Amount must be > 0");
+      alert('Amount must be > 0');
       return;
     }
 
     if (!socket) {
-      alert("Not connected to chat");
+      alert('Not connected to chat');
       return;
     }
 
@@ -41,16 +41,16 @@ export default function MessageInput({ conversationId, recipient, socket }: Prop
     try {
       const txHash = await transferToken(recipient, Math.floor(n));
       const transferMsg = {
-        type: "transfer",
+        type: 'transfer',
         amount: Math.floor(n),
-        token: "TOKEN",
+        token: 'TOKEN',
         txHash,
       };
-      socket.emit("send_message", {
+      socket.emit('send_message', {
         conversationId,
         content: JSON.stringify(transferMsg),
       });
-      setAmount("");
+      setAmount('');
       setShowPay(false);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -77,7 +77,7 @@ export default function MessageInput({ conversationId, recipient, socket }: Prop
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") handleSendText();
+          if (e.key === 'Enter') handleSendText();
         }}
         disabled={busy}
       />
@@ -94,11 +94,7 @@ export default function MessageInput({ conversationId, recipient, socket }: Prop
         <div className="absolute bottom-20 left-0 w-80 bg-white border rounded shadow-lg p-4 z-50">
           <div className="text-sm font-semibold mb-2">Send token</div>
           <label className="block text-xs text-gray-600">Recipient</label>
-          <input
-            className="w-full p-2 border rounded mb-2 text-sm"
-            value={recipient}
-            readOnly
-          />
+          <input className="w-full p-2 border rounded mb-2 text-sm" value={recipient} readOnly />
 
           <label className="block text-xs text-gray-600 mt-2">Amount</label>
           <input
@@ -112,11 +108,7 @@ export default function MessageInput({ conversationId, recipient, socket }: Prop
           />
 
           <div className="flex justify-end gap-2">
-            <button
-              className="px-3 py-1 text-sm"
-              onClick={() => setShowPay(false)}
-              disabled={busy}
-            >
+            <button className="px-3 py-1 text-sm" onClick={() => setShowPay(false)} disabled={busy}>
               Cancel
             </button>
             <button
@@ -124,7 +116,7 @@ export default function MessageInput({ conversationId, recipient, socket }: Prop
               onClick={handleConfirmTransfer}
               disabled={busy}
             >
-              {busy ? "Processing..." : "Confirm"}
+              {busy ? 'Processing...' : 'Confirm'}
             </button>
           </div>
         </div>

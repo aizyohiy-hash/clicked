@@ -1,11 +1,11 @@
-"use client";
+'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { apiFetch } from "@/lib/api";
-import { signWalletMessage } from "@/lib/freighter";
-import { useWallet } from "@/contexts/WalletContext";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { apiFetch } from '@/lib/api';
+import { signWalletMessage } from '@/lib/freighter';
+import { useWallet } from '@/contexts/WalletContext';
 
-const TOKEN_STORAGE_KEY = "clicked.jwt";
+const TOKEN_STORAGE_KEY = 'clicked.jwt';
 
 interface AuthUser {
   walletAddress: string;
@@ -23,9 +23,9 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 function parseJwtUser(token: string): AuthUser | null {
   try {
-    const [, payload] = token.split(".");
+    const [, payload] = token.split('.');
     if (!payload) return null;
-    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
     const decoded = JSON.parse(window.atob(normalized)) as { walletAddress?: string };
     return decoded.walletAddress ? { walletAddress: decoded.walletAddress } : null;
   } catch {
@@ -51,13 +51,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(true);
     try {
       const walletAddress = publicKey ?? (await connect());
-      const challengeResponse = await apiFetch("/auth/challenge", {
-        method: "POST",
+      const challengeResponse = await apiFetch('/auth/challenge', {
+        method: 'POST',
         body: JSON.stringify({ walletAddress }),
       });
 
       if (!challengeResponse.ok) {
-        throw new Error("Unable to request sign-in challenge");
+        throw new Error('Unable to request sign-in challenge');
       }
 
       const { message, nonce } = (await challengeResponse.json()) as {
@@ -65,13 +65,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         nonce: string;
       };
       const signature = await signWalletMessage(message, walletAddress);
-      const verifyResponse = await apiFetch("/auth/verify", {
-        method: "POST",
+      const verifyResponse = await apiFetch('/auth/verify', {
+        method: 'POST',
         body: JSON.stringify({ walletAddress, signature, nonce }),
       });
 
       if (!verifyResponse.ok) {
-        throw new Error("Unable to verify signed challenge");
+        throw new Error('Unable to verify signed challenge');
       }
 
       const { token: nextToken } = (await verifyResponse.json()) as { token: string };
@@ -100,7 +100,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 export function useAuth() {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error("useAuth must be used within AuthProvider");
+    throw new Error('useAuth must be used within AuthProvider');
   }
   return context;
 }
