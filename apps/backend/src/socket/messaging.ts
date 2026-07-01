@@ -66,13 +66,22 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
 
   // ── send_message ───────────────────────────────────────────────────────────
   dispatcher.register('send_message', async (payload) => {
-    const { conversationId, messageId, content, contentType, ciphertext, envelopes } = payload as {
+    const {
+      conversationId,
+      messageId,
+      content,
+      contentType,
+      ciphertext,
+      envelopes,
+      fileId: payloadFileId,
+    } = payload as {
       conversationId: string;
       messageId?: string;
       content?: string;
       contentType?: string;
       ciphertext?: string;
       envelopes?: Array<{ recipientDeviceId: string; ciphertext: string }>;
+      fileId?: string;
     };
     const deviceId = socket.auth!.deviceId;
 
@@ -103,7 +112,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       contentType,
       ciphertext: effectiveCiphertext,
       envelopes,
-      fileId,
+      fileId: payloadFileId,
     });
     if (!validation.ok) {
       socket.emit('error', {
@@ -136,7 +145,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       return;
     }
 
-    let fileId: string | undefined;
+    let fileId: string | undefined = payloadFileId;
     const resolvedContentType = contentType || 'text/plain';
     if (FILE_CONTENT_TYPES.has(resolvedContentType)) {
       const [fileRow] = await db
@@ -144,7 +153,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
         .values({ storageKey: messageId })
         .onConflictDoUpdate({ target: files.storageKey, set: { storageKey: messageId } })
         .returning({ id: files.id });
-      fileId = fileRow?.id;
+      fileId = fileRow?.id ?? payloadFileId;
     }
 
     const [message] = await db
@@ -197,9 +206,12 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       }
     }
 
-    if (message) {
-      socket.emit('message_ack', { messageId, sequenceNumber: message.sequenceNumber });
+    if (!message) {
+      socket.emit('error', { event: 'send_message', message: 'Failed to persist message' });
+      return;
     }
+
+    socket.emit('message_ack', { messageId, sequenceNumber: message.sequenceNumber });
 
     await deliverMessage(io, message, conversationId);
 
@@ -327,6 +339,118 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
     void dispatchOfflinePush(conversationId, messageId, recipientDeviceIds);
   });
 
+  // ── send_file_message ──────────────────────────────────────────────────────
+  // Payload: { conversationId: string; fileId: string; content: string;
+  //            contentType: 'file'|'image'|'video'|'audio' }
+  //
+  // `content` is the E2EE envelope ciphertext. It must contain the fields
+  // { fileId, fileName, mimeType, size, fileKey, thumbnail? } client-side before
+  // encryption. The server only validates that:
+  //   1. The sender is a member of the conversation.
+  //   2. The referenced file exists, is `ready`, and belongs to this conversation
+  //      (uploader access-control — only the uploader may reference a file).
+  //
+  // `fileKey` must NEVER appear server-side in plaintext — it exists only inside
+  // the encrypted `content` envelope.
+  socket.on(
+    'send_file_message',
+    async (payload: {
+      conversationId: string;
+      fileId: string;
+      content: string;
+      contentType: 'file' | 'image' | 'video' | 'audio';
+    }) => {
+      const { conversationId, fileId, content, contentType } = payload;
+
+      if (!content?.trim()) {
+        socket.emit('error', {
+          event: 'send_file_message',
+          message: 'Content (envelope ciphertext) must not be empty',
+        });
+        return;
+      }
+
+      const validContentTypes = ['file', 'image', 'video', 'audio'] as const;
+      if (!validContentTypes.includes(contentType)) {
+        socket.emit('error', {
+          event: 'send_file_message',
+          message: 'contentType must be one of: file, image, video, audio',
+        });
+        return;
+      }
+
+      const membership = await db.query.conversationMembers.findFirst({
+        where: and(
+          eq(conversationMembers.conversationId, conversationId),
+          eq(conversationMembers.userId, userId),
+        ),
+      });
+
+      if (!membership) {
+        socket.emit('error', {
+          event: 'send_file_message',
+          message: 'Not a member of this conversation',
+        });
+        return;
+      }
+
+      // Validate file: must exist, be ready, belong to this conversation, and
+      // have been uploaded by the sender (access-control).
+      const file = await db.query.files.findFirst({
+        where: eq(files.id, fileId),
+      });
+
+      if (!file) {
+        socket.emit('error', { event: 'send_file_message', message: 'File not found' });
+        return;
+      }
+
+      if (file.status !== 'ready') {
+        socket.emit('error', {
+          event: 'send_file_message',
+          message: 'File is not ready for use',
+        });
+        return;
+      }
+
+      if (file.conversationId !== conversationId) {
+        socket.emit('error', {
+          event: 'send_file_message',
+          message: 'File does not belong to this conversation',
+        });
+        return;
+      }
+
+      if (file.uploaderId !== userId) {
+        socket.emit('error', {
+          event: 'send_file_message',
+          message: 'Access denied: you are not the uploader of this file',
+        });
+        return;
+      }
+
+      const [message] = await db
+        .insert(messages)
+        .values({
+          conversationId,
+          senderId: userId,
+          content: content.trim(),
+          contentType,
+          fileId,
+        })
+        .returning();
+
+      io.to(conversationId).emit('new_message', message);
+
+      const members = await db.query.conversationMembers.findMany({
+        where: eq(conversationMembers.conversationId, conversationId),
+        columns: { userId: true },
+      });
+
+      await invalidateConversationCaches(members.map((member) => member.userId));
+    },
+  );
+
   // ── message_history ────────────────────────────────────────────────────────
   dispatcher.register('message_history', async (payload) => {
     const { conversationId, before } = payload as {
@@ -364,7 +488,11 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
         : eq(messages.conversationId, conversationId),
       orderBy: desc(messages.createdAt),
       limit: PAGE_SIZE,
-      with: { sender: { columns: { id: true, username: true, avatarUrl: true } } },
+      with: {
+        envelopes: true,
+        senderDevice: true,
+        sender: { columns: { id: true, username: true, avatarUrl: true } },
+      },
     });
 
     socket.emit('message_history', {

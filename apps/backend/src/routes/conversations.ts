@@ -247,7 +247,9 @@ conversationsRouter.get('/:id/members', async (req: AuthRequest, res) => {
     with: {
       user: {
         columns: { id: true, username: true, avatarUrl: true },
-        with: { wallets: { columns: { address: true, isPrimary: true } } },
+        with: {
+          wallets: { columns: { address: true, isPrimary: true } },
+        },
       },
     },
   })) as ConversationMemberPayload[];

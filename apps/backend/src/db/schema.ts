@@ -53,22 +53,6 @@ export const contentTypeEnum = pgEnum('content_type', [
   'system',
 ]);
 
-// ─── Files (#231) ─────────────────────────────────────────────────────────────
-//
-// Tracks S3 storage objects for file-type messages. Soft-deleted when all
-// referencing messages are retracted; hard-deleted by the background cleanup job.
-
-export const files = pgTable('files', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  storageKey: text('storage_key').notNull().unique(),
-  deletedAt: timestamp('deleted_at'),
-  hardDeletedAt: timestamp('hard_deleted_at'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-});
-
-export type File = typeof files.$inferSelect;
-export type NewFile = typeof files.$inferInsert;
-
 export const conversationMembers = pgTable('conversation_members', {
   id: uuid('id').primaryKey().defaultRandom(),
   conversationId: uuid('conversation_id')
@@ -83,6 +67,33 @@ export const conversationMembers = pgTable('conversation_members', {
   isMuted: boolean('is_muted').notNull().default(false),
   isArchived: boolean('is_archived').notNull().default(false),
   joinedAt: timestamp('joined_at').notNull().defaultNow(),
+});
+
+// ─── Uploaded files (#228) ───────────────────────────────────────────────────
+//
+// Tracks files that clients have uploaded to object storage. A file moves
+// through: pending → ready (server-confirmed the bytes arrived) → deleted.
+// Only `ready` files may be referenced in file messages. The `fileKey`
+// (symmetric encryption key) lives exclusively inside the E2EE envelope
+// ciphertext — it is NEVER stored here.
+
+export const fileStatusEnum = pgEnum('file_status', ['pending', 'ready', 'deleted']);
+
+export const files = pgTable('files', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  uploaderId: uuid('uploader_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  conversationId: uuid('conversation_id')
+    .notNull()
+    .references(() => conversations.id, { onDelete: 'cascade' }),
+  status: fileStatusEnum('status').notNull().default('pending'),
+  size: integer('size').notNull(),
+  mimeType: text('mime_type').notNull(),
+  sha256: text('sha256').notNull(),
+  storageKey: text('storage_key').notNull(),
+  isThumbnail: boolean('is_thumbnail').notNull().default(false),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
 export const messages = pgTable('messages', {
@@ -100,11 +111,6 @@ export const messages = pgTable('messages', {
   sequenceNumber: serial('sequence_number'),
   ciphertext: text('ciphertext'),
   fileId: uuid('file_id').references(() => files.id, { onDelete: 'set null' }),
-  // Edits are stored as a brand-new message linked back to the message they
-  // replace (#190). Plaintext/ciphertext is never mutated in place; clients
-  // resolve a thread to the newest version sharing the same original id.
-  // Self-referential FK — `set null` so deleting an original doesn't cascade
-  // away its edits.
   editsMessageId: uuid('edits_message_id').references((): AnyPgColumn => messages.id, {
     onDelete: 'set null',
   }),
@@ -143,6 +149,8 @@ export const messageEnvelopes = pgTable(
 // signature validation.  `isRevoked` lets the server reject stale devices
 // without deleting the row (preserving audit history).
 
+export const devicePlatformEnum = pgEnum('device_platform', ['web', 'ios', 'android']);
+
 export const devices = pgTable(
   'devices',
   {
@@ -152,6 +160,11 @@ export const devices = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     // Base64-encoded Ed25519 public key for this device.
     identityPublicKey: text('identity_public_key').notNull(),
+    // X3DH/Signal registration id published in the prekey bundle (#305).
+    registrationId: integer('registration_id'),
+    deviceName: text('device_name'),
+    platform: devicePlatformEnum('platform'),
+    lastSeenAt: timestamp('last_seen_at'),
     isRevoked: boolean('is_revoked').notNull().default(false),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
@@ -224,8 +237,6 @@ export const tokenTransfers = pgTable('token_transfers', {
 // auditable. `(userId, deviceId)` is unique so a client re-registering the same
 // device upserts instead of duplicating, and the partial index keeps lookups of
 // a user's *active* devices fast.
-
-export const devicePlatformEnum = pgEnum('device_platform', ['web', 'ios', 'android']);
 
 export const userDevices = pgTable(
   'user_devices',
@@ -323,6 +334,16 @@ export const conversationsRelations = relations(conversations, ({ many }) => ({
   messages: many(messages),
   transfers: many(tokenTransfers),
   treasuryProposals: many(treasuryProposals),
+  files: many(files),
+}));
+
+export const filesRelations = relations(files, ({ one, many }) => ({
+  uploader: one(users, { fields: [files.uploaderId], references: [users.id] }),
+  conversation: one(conversations, {
+    fields: [files.conversationId],
+    references: [conversations.id],
+  }),
+  messages: many(messages),
 }));
 
 export const conversationMembersRelations = relations(conversationMembers, ({ one }) => ({
@@ -345,19 +366,12 @@ export const messagesRelations = relations(messages, ({ one, many }) => ({
   }),
   file: one(files, { fields: [messages.fileId], references: [files.id] }),
   envelopes: many(messageEnvelopes),
-  // The original message this one edits (null for originals). Paired with
-  // `edits` below via a shared relation name so Drizzle can disambiguate the
-  // self-join (#190).
   editsMessage: one(messages, {
     fields: [messages.editsMessageId],
     references: [messages.id],
     relationName: 'message_edits',
   }),
   edits: many(messages, { relationName: 'message_edits' }),
-}));
-
-export const filesRelations = relations(files, ({ many }) => ({
-  messages: many(messages),
 }));
 
 export const messageEnvelopesRelations = relations(messageEnvelopes, ({ one }) => ({
@@ -426,6 +440,8 @@ export type NewConversation = typeof conversations.$inferInsert;
 export type ConversationMember = typeof conversationMembers.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
+export type File = typeof files.$inferSelect;
+export type NewFile = typeof files.$inferInsert;
 export type MessageEnvelope = typeof messageEnvelopes.$inferSelect;
 export type NewMessageEnvelope = typeof messageEnvelopes.$inferInsert;
 export type TokenTransfer = typeof tokenTransfers.$inferSelect;

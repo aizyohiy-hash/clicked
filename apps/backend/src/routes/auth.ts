@@ -57,7 +57,15 @@ authRouter.post(
   verifyLimiter,
   validate(VerifySchema),
   async (req: Request, res: Response) => {
-    const { walletAddress, signature, nonce, identityPublicKey } = req.body as VerifyBody;
+    const {
+      walletAddress,
+      signature,
+      nonce,
+      identityPublicKey,
+      deviceName,
+      platform,
+      registrationId,
+    } = req.body as VerifyBody;
 
     // Validate and consume nonce
     const valid = consumeNonce(walletAddress, nonce);
@@ -123,10 +131,26 @@ authRouter.post(
         return;
       }
       deviceId = existingDevice.id;
+      await db
+        .update(devices)
+        .set({
+          lastSeenAt: new Date(),
+          ...(deviceName ? { deviceName } : {}),
+          ...(platform ? { platform } : {}),
+          ...(registrationId !== undefined ? { registrationId } : {}),
+        })
+        .where(eq(devices.id, deviceId));
     } else {
       const [newDevice] = await db
         .insert(devices)
-        .values({ userId, identityPublicKey })
+        .values({
+          userId,
+          identityPublicKey,
+          deviceName: deviceName ?? null,
+          platform: platform ?? null,
+          registrationId: registrationId ?? null,
+          lastSeenAt: new Date(),
+        })
         .returning({ id: devices.id });
       if (!newDevice) {
         res.status(500).json({ error: 'Failed to register device' });
