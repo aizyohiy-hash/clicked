@@ -388,7 +388,8 @@ async function emitDeviceChangeEvent(userId: string, change: 'device_added' | 'd
         .values({
           conversationId: m.conversationId,
           senderId: userId,
-          content: JSON.stringify({ userId, change }),
+          contentType: 'system',
+          ciphertext: JSON.stringify({ userId, change }),
         })
         .returning();
 

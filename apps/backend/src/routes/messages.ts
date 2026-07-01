@@ -61,39 +61,51 @@ messagesRouter.post('/', validate(SendMessageSchema), async (req: AuthRequest, r
     return;
   }
 
-  // ── persist ────────────────────────────────────────────────────────────────
-  const [message] = await db
-    .insert(messages)
-    .values({
-      id: messageId,
-      conversationId,
-      senderId: userId,
-      senderDeviceId: deviceId ?? null,
-      contentType: contentType?.trim().toLowerCase() || 'text',
-      ciphertext: ciphertext || null,
-    })
-    .returning();
+  // ── persist in transaction ─────────────────────────────────────────────────
+  let message;
+  try {
+    message = await db.transaction(async (tx) => {
+      const [insertedMessage] = await tx
+        .insert(messages)
+        .values({
+          id: messageId,
+          conversationId,
+          senderId: userId,
+          senderDeviceId: deviceId ?? null,
+          contentType: contentType?.trim().toLowerCase() || 'text',
+          ciphertext: ciphertext || null,
+          fileId: fileId ?? null,
+        })
+        .returning();
 
-  if (envelopes && envelopes.length > 0) {
-    const deviceIds = envelopes.map((e) => e.recipientDeviceId);
-    const devicesList = await db.query.userDevices.findMany({
-      where: inArray(userDevices.id, deviceIds),
-      columns: { id: true, userId: true },
+      if (envelopes && envelopes.length > 0) {
+        const deviceIds = envelopes.map((e) => e.recipientDeviceId);
+        const devicesList = await tx.query.userDevices.findMany({
+          where: inArray(userDevices.id, deviceIds),
+          columns: { id: true, userId: true },
+        });
+        const deviceToUser = new Map(devicesList.map((d) => [d.id, d.userId]));
+
+        const validEnvelopes = envelopes
+          .filter((env) => deviceToUser.has(env.recipientDeviceId))
+          .map((env) => ({
+            messageId,
+            recipientDeviceId: env.recipientDeviceId,
+            recipientUserId: deviceToUser.get(env.recipientDeviceId)!,
+            ciphertext: env.ciphertext,
+          }));
+
+        if (validEnvelopes.length > 0) {
+          await tx.insert(messageEnvelopes).values(validEnvelopes);
+        }
+      }
+
+      return insertedMessage;
     });
-    const deviceToUser = new Map(devicesList.map((d) => [d.id, d.userId]));
-
-    const validEnvelopes = envelopes
-      .filter((env) => deviceToUser.has(env.recipientDeviceId))
-      .map((env) => ({
-        messageId,
-        recipientDeviceId: env.recipientDeviceId,
-        recipientUserId: deviceToUser.get(env.recipientDeviceId)!,
-        ciphertext: env.ciphertext,
-      }));
-
-    if (validEnvelopes.length > 0) {
-      await db.insert(messageEnvelopes).values(validEnvelopes);
-    }
+  } catch (error) {
+    console.error('Transaction failed for message insert:', error);
+    res.status(500).json({ error: 'Failed to persist message' });
+    return;
   }
 
   // ── broadcast via Socket.IO ────────────────────────────────────────────────

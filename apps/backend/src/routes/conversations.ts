@@ -511,7 +511,10 @@ conversationsRouter.get('/:id/messages', async (req: AuthRequest, res) => {
 });
 
 conversationsRouter.get('/:id/search', async (req: AuthRequest, res) => {
-  res.status(501).json({ error: 'Search is not supported in E2EE conversations' });
+  res.status(410).json({ 
+    error: 'Server-side search removed; search is now client-side over decrypted messages',
+    docs: 'https://github.com/DripWave/clicked/blob/main/docs/message-encryption-migration.md'
+  });
 });
 
 // PATCH /conversations/:id/settings — update muted/archived state for the authenticated user
