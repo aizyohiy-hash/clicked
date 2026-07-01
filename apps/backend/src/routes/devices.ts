@@ -324,7 +324,11 @@ devicesRouter.post('/', validate(RegisterDeviceSchema), async (req: AuthRequest,
         identityPublicKey: body.identityPublicKey,
         registrationId: body.registrationId ?? undefined,
       })
-      .returning({ id: userDevices.id, deviceId: userDevices.deviceId, createdAt: userDevices.createdAt });
+      .returning({
+        id: userDevices.id,
+        deviceId: userDevices.deviceId,
+        createdAt: userDevices.createdAt,
+      });
 
     // Emit system event to each conversation the user belongs to
     void emitDeviceChangeEvent(userId, 'device_added');
@@ -381,7 +385,11 @@ async function emitDeviceChangeEvent(userId: string, change: 'device_added' | 'd
     for (const m of memberships) {
       const [msg] = await db
         .insert(messages)
-        .values({ conversationId: m.conversationId, senderId: userId, content: JSON.stringify({ userId, change }) })
+        .values({
+          conversationId: m.conversationId,
+          senderId: userId,
+          content: JSON.stringify({ userId, change }),
+        })
         .returning();
 
       const io = getSocketServer();
