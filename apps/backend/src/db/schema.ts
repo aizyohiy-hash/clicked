@@ -142,7 +142,6 @@ export const messageEnvelopes = pgTable(
   ],
 );
 
-
 // ─── Devices & prekeys (issues #158, #159, #162) ─────────────────────────────
 //
 // Each user may register multiple devices. Each device has an Ed25519 identity
@@ -400,7 +399,6 @@ export const devicesRelations = relations(devices, ({ one, many }) => ({
   signedPreKey: many(signedPreKeys),
   oneTimePreKeys: many(oneTimePreKeys),
 }));
-
 
 export const signedPreKeysRelations = relations(signedPreKeys, ({ one }) => ({
   device: one(devices, { fields: [signedPreKeys.deviceId], references: [devices.id] }),
