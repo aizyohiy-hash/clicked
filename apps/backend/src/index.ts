@@ -12,6 +12,7 @@ import { registerMessagingHandlers } from './socket/messaging.js';
 import { app } from './app.js';
 import { redis as appRedis } from './lib/redis.js';
 import { setSocketServer } from './lib/socket.js';
+import { setOnline, setOffline, refreshPresence, isOnline } from './services/presence.js';
 import {
   cleanupStaleSockets,
   reconcileBoot,
@@ -106,7 +107,6 @@ io.use(socketAuthMiddleware);
 
 io.on('connection', async (socket: AuthSocket) => {
   const userId = socket.auth!.userId;
-  const deviceId = socket.auth!.deviceId;
   console.log('User connected:', userId, socket.id);
 
   socket.data['userId'] = userId;
@@ -173,12 +173,6 @@ io.on('connection', async (socket: AuthSocket) => {
     await socket.join(m.conversationId);
   }
 
-  const user = await db.query.users.findFirst({
-    where: eq(users.id, userId),
-    columns: { presenceVisible: true },
-  });
-  const presenceVisible = user?.presenceVisible ?? true;
-
   if (appRedis) {
     await registerPresenceSocket(appRedis, userId, deviceId, socket.id);
     await cleanupStaleSockets(io, appRedis, userId, socket.id);
@@ -187,7 +181,12 @@ io.on('connection', async (socket: AuthSocket) => {
     if (becameOnline && presenceVisible) {
       for (const m of memberships) {
         io.to(m.conversationId).emit('user_online', { userId });
-        io.to(m.conversationId).emit('presence_update', { userId, online: true });
+        io.to(m.conversationId).emit('presence_update', {
+          userId,
+          online: true,
+          status: 'online',
+          lastSeen: Date.now(),
+        });
       }
       await recordPresenceForCoMembers(
         userId,
