@@ -47,12 +47,14 @@ import {
 } from './services/stellarListener.js';
 import { startFileCleanupJob } from './services/fileCleanup.js';
 import { loadEnv } from './config.js';
+import { createObjectStore } from './lib/objectStore.js';
 
 dotenv.config();
 
 // Validate required environment variables at boot. Exits with code 1 and
 // logs the offending vars if anything is missing or malformed.
-loadEnv();
+const env = loadEnv();
+export const objectStore = createObjectStore(env);
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
