@@ -1,53 +1,97 @@
 import { Router } from 'express';
 import type { IRouter } from 'express';
-import { eq } from 'drizzle-orm';
-import { randomUUID } from 'crypto';
+import { and, eq } from 'drizzle-orm';
+import { z } from 'zod';
 import { db } from '../db/index.js';
-import { files } from '../db/schema.js';
+import { files, conversationMembers } from '../db/schema.js';
 import { requireAuth, type AuthRequest } from '../middleware/auth.js';
-import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { generatePresignedPut, generateStorageKey } from '../lib/storage.js';
 
 export const uploadsRouter: IRouter = Router();
+
 uploadsRouter.use(requireAuth);
 
-const s3 = new S3Client({
-  region: process.env['AWS_REGION'] || 'us-east-1',
-});
-const bucketName = process.env['AWS_BUCKET'] || 'clicked-files';
+const MAX_SIZE_BYTES = 100 * 1024 * 1024; // 100 MB
 
-uploadsRouter.post('/', async (_req: AuthRequest, res) => {
-  const fileId = randomUUID();
-  try {
-    await db.insert(files).values({
-      id: fileId,
-      storageKey: fileId,
-      status: 'pending',
-    });
+const ALLOWED_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'video/mp4',
+  'video/webm',
+  'audio/mpeg',
+  'audio/ogg',
+  'audio/wav',
+  'application/pdf',
+  'application/octet-stream',
+]);
 
-    const command = new PutObjectCommand({
-      Bucket: bucketName,
-      Key: fileId,
-    });
-    // Short-lived URL: 15 minutes
-    const presignedUrl = await getSignedUrl(s3, command, { expiresIn: 900 });
-
-    res.status(201).json({ fileId, uploadUrl: presignedUrl });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to initiate upload' });
-  }
+const RequestSlotSchema = z.object({
+  conversationId: z.string().uuid(),
+  size: z.number().int().positive().max(MAX_SIZE_BYTES),
+  mimeType: z.string().min(1),
+  sha256: z.string().min(1),
+  isThumbnail: z.boolean().optional().default(false),
 });
 
-uploadsRouter.post('/:fileId/confirm', async (req: AuthRequest, res) => {
-  const fileId = req.params['fileId'] as string;
-  const { size, sha256 } = req.body as { size?: number; sha256?: string };
+// POST /uploads — request a presigned upload slot
+uploadsRouter.post('/', async (req: AuthRequest, res) => {
+  const userId = req.auth!.userId;
 
-  if (!fileId) {
-    res.status(400).json({ error: 'File id is required' });
+  const parsed = RequestSlotSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', details: parsed.error.issues });
     return;
   }
-  if (size === undefined || typeof size !== 'number') {
-    res.status(400).json({ error: 'Size is required and must be a number' });
+
+  const { conversationId, size, mimeType, sha256, isThumbnail } = parsed.data;
+
+  if (!ALLOWED_MIME_TYPES.has(mimeType)) {
+    res.status(415).json({ error: 'Unsupported media type', mimeType });
+    return;
+  }
+
+  // Caller must be a member of the conversation
+  const membership = await db.query.conversationMembers.findFirst({
+    where: and(
+      eq(conversationMembers.conversationId, conversationId),
+      eq(conversationMembers.userId, userId),
+    ),
+  });
+
+  if (!membership) {
+    res.status(403).json({ error: 'Not a member of this conversation' });
+    return;
+  }
+
+  const storageKey = generateStorageKey(conversationId, sha256);
+  const uploadUrl = await generatePresignedPut(storageKey, mimeType);
+
+  const [file] = await db
+    .insert(files)
+    .values({
+      uploaderId: userId,
+      conversationId,
+      status: 'pending',
+      size,
+      mimeType,
+      sha256,
+      storageKey,
+      isThumbnail,
+    })
+    .returning({ id: files.id });
+
+  res.status(201).json({ fileId: file!.id, uploadUrl });
+});
+
+// POST /uploads/:fileId/confirm — mark file as ready after client PUT succeeds
+uploadsRouter.post('/:fileId/confirm', async (req: AuthRequest, res) => {
+  const userId = req.auth!.userId;
+  const fileId = req.params['fileId'] as string;
+
+  if (!fileId) {
+    res.status(400).json({ error: 'fileId is required' });
     return;
   }
 
