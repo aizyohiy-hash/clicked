@@ -1,16 +1,16 @@
-"use client";
+'use client';
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AuthContext } from "./AuthContext";
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AuthContext } from './AuthContext';
 
-const TOKEN_STORAGE_KEY = "clicked_token";
+const TOKEN_STORAGE_KEY = 'clicked_token';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setTokenState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === 'undefined') {
       return;
     }
 
@@ -29,7 +29,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const setToken = useCallback((nextToken: string) => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== 'undefined') {
       window.localStorage.setItem(TOKEN_STORAGE_KEY, nextToken);
     }
 
@@ -37,7 +37,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const clearToken = useCallback(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== 'undefined') {
       window.localStorage.removeItem(TOKEN_STORAGE_KEY);
     }
 

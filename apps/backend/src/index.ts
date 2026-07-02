@@ -3,6 +3,9 @@ import { Server } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { createClient } from 'redis';
 import dotenv from 'dotenv';
+import { eq, isNull, and } from 'drizzle-orm';
+import { db } from './db/index.js';
+import { conversationMembers, users, userDevices } from './db/schema.js';
 import { eq, inArray } from 'drizzle-orm';
 import { db } from './db/index.js';
 import { conversationMembers, users } from './db/schema.js';
@@ -12,38 +15,72 @@ import { registerMessagingHandlers } from './socket/messaging.js';
 import { app } from './app.js';
 import { redis as appRedis } from './lib/redis.js';
 import { setSocketServer } from './lib/socket.js';
-import { setOnline, setOffline } from './services/presence.js';
+import { setOnline, setOffline, refreshPresence, isOnline, deriveDevicePresence } from './services/presence.js';
+import {
+  cleanupStaleSockets,
+  reconcileBoot,
+  refreshPresenceSocket,
+  registerPresenceSocket,
+  setOffline,
+  setOnline,
+  unregisterPresenceSocket,
+} from './services/presence.js';
 import { startHeartbeatTimer, clearHeartbeatTimer } from './services/heartbeat.js';
 import {
-  registerDeviceSocket,
-  unregisterDeviceSocket,
   isDeviceRevoked,
+  registerDeviceSocket,
   startDeviceRevocationListener,
+  unregisterDeviceSocket,
 } from './services/deviceRevocation.js';
 import {
-  checkRateLimit,
   checkPayloadSize,
-  recordViolation,
+  checkRateLimit,
   clearViolations,
+  recordViolation,
 } from './services/rateLimit.js';
 import { registerForBackpressure, unregisterForBackpressure } from './services/backpressure.js';
+import { getGatewaySubscriber } from './services/deviceDelivery.js';
 import {
   buildRpcFetcher,
   buildTreasuryRpcFetcher,
   runForever as runStellarListener,
 } from './services/stellarListener.js';
+import { startFileCleanupJob } from './services/fileCleanup.js';
 import { loadEnv } from './config.js';
+import { createObjectStore } from './lib/objectStore.js';
 
 dotenv.config();
 
 // Validate required environment variables at boot. Exits with code 1 and
 // logs the offending vars if anything is missing or malformed.
-loadEnv();
+const env = loadEnv();
+export const objectStore = createObjectStore(env);
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: '*' },
 });
+
+let isShuttingDown = false;
+
+const handleShutdown = () => {
+  isShuttingDown = true;
+};
+
+process.on('SIGTERM', handleShutdown);
+process.on('SIGINT', handleShutdown);
+
+const origIoClose = io.close.bind(io);
+io.close = ((fn?: () => void) => {
+  isShuttingDown = true;
+  return origIoClose(fn);
+}) as typeof io.close;
+
+const origHttpClose = httpServer.close.bind(httpServer);
+httpServer.close = ((fn?: (err?: Error) => void) => {
+  isShuttingDown = true;
+  return origHttpClose(fn);
+}) as typeof httpServer.close;
 
 setSocketServer(io);
 
@@ -58,10 +95,12 @@ async function recordPresenceForCoMembers(
   if (!appRedis || conversationIds.length === 0) {
     return;
   }
+
   const coMembers = await db.query.conversationMembers.findMany({
     where: inArray(conversationMembers.conversationId, conversationIds),
     columns: { userId: true },
   });
+
   await publishEphemeral(
     appRedis,
     coMembers.map((m) => m.userId).filter((id) => id !== userId),
@@ -74,15 +113,35 @@ io.use(socketAuthMiddleware);
 io.on('connection', async (socket: AuthSocket) => {
   const userId = socket.auth!.userId;
   const deviceId = socket.auth!.deviceId;
+  const identityPublicKey = socket.identityPublicKey;
   console.log('User connected:', userId, socket.id);
 
+  socket.data['userId'] = userId;
+  socket.data['deviceId'] = deviceId;
+
   // Register socket for device-revocation tracking (cross-instance via Redis pub/sub).
-  if (appRedis) {
-    registerDeviceSocket(deviceId, socket.id);
-  }
+  registerDeviceSocket(deviceId, socket.id);
 
   // Start the server-side heartbeat watchdog (90 s timeout).
-  startHeartbeatTimer(socket, userId, deviceId, appRedis, io);
+  startHeartbeatTimer(socket, userId, deviceId, appRedis, io, identityPublicKey);
+
+  // Update user_devices.lastSeenAt for device-based presence derivation.
+  if (identityPublicKey) {
+    try {
+      await db
+        .update(userDevices)
+        .set({ lastSeenAt: new Date() })
+        .where(
+          and(
+            eq(userDevices.userId, userId),
+            eq(userDevices.identityPublicKey, identityPublicKey),
+            isNull(userDevices.revokedAt),
+          ),
+        );
+    } catch {
+      // Non-critical update; ignore errors.
+    }
+  }
 
   // Per-socket middleware: intercept every incoming event before handlers.
   const EXCLUDED_EVENTS = new Set(['heartbeat']);
@@ -124,6 +183,11 @@ io.on('connection', async (socket: AuthSocket) => {
     next();
   });
 
+  // Join a device-scoped room so the delivery pipeline can push envelopes to
+  // exactly this device, even across horizontally-scaled instances via the
+  // Redis adapter.
+  await socket.join(`device:${deviceId}`);
+
   // Auto-join all conversation rooms so the socket receives new_message events
   // for every conversation the user belongs to (needed for unread badge tracking).
   const memberships = await db.query.conversationMembers.findMany({
@@ -134,18 +198,20 @@ io.on('connection', async (socket: AuthSocket) => {
     await socket.join(m.conversationId);
   }
 
-  const user = await db.query.users.findFirst({
-    where: eq(users.id, userId),
-    columns: { presenceVisible: true },
-  });
-  const presenceVisible = user?.presenceVisible ?? true;
-
   if (appRedis) {
-    await setOnline(appRedis, userId, socket.id);
-    if (presenceVisible) {
+    await registerPresenceSocket(appRedis, userId, deviceId, socket.id);
+    await cleanupStaleSockets(io, appRedis, userId, socket.id);
+
+    const becameOnline = await setOnline(appRedis, userId, deviceId);
+    if (becameOnline && presenceVisible) {
       for (const m of memberships) {
         io.to(m.conversationId).emit('user_online', { userId });
-        io.to(m.conversationId).emit('presence_update', { userId, online: true });
+        io.to(m.conversationId).emit('presence_update', {
+          userId,
+          online: true,
+          status: 'online',
+          lastSeen: Date.now(),
+        });
       }
       await recordPresenceForCoMembers(
         userId,
@@ -155,20 +221,86 @@ io.on('connection', async (socket: AuthSocket) => {
     }
   }
 
+  socket.on('heartbeat', async () => {
+    if (appRedis) {
+      await refreshPresenceSocket(appRedis, userId, deviceId, socket.id);
+      await cleanupStaleSockets(io, appRedis, userId, socket.id);
+    }
+  });
+
   registerMessagingHandlers(io, socket);
+
+  // Subscribe to the device delivery channel so cross-node per-device
+  // envelopes reach this socket (#192).
+  if (appRedis) {
+    const gatewaySub = getGatewaySubscriber(appRedis);
+    gatewaySub
+      .addDevice(deviceId, (payload) => {
+        socket.emit('device_envelope', payload);
+      })
+      .catch((err: Error) => {
+        console.warn('[deviceDelivery] failed to subscribe device', deviceId, err.message);
+      });
+  }
 
   // Monitor send-buffer to detect slow/stalled consumers.
   registerForBackpressure(socket);
 
-  socket.on('disconnect', async () => {
-    console.log('User disconnected:', userId);
+  socket.on('disconnect', async (reason: string) => {
+    console.log('User disconnected:', userId, reason);
+
     clearHeartbeatTimer(socket.id);
     unregisterDeviceSocket(socket.id);
+
+    // Unsubscribe from the device delivery channel on disconnect.
+    if (appRedis) {
+      const gatewaySub = getGatewaySubscriber(appRedis);
+      gatewaySub.removeDevice(deviceId).catch(() => {});
+    }
+
     unregisterForBackpressure(socket);
     clearViolations(socket.id);
 
+    // Update user_devices.lastSeenAt on disconnect.
+    if (identityPublicKey) {
+      try {
+        await db
+          .update(userDevices)
+          .set({ lastSeenAt: new Date() })
+          .where(
+            and(
+              eq(userDevices.userId, userId),
+              eq(userDevices.identityPublicKey, identityPublicKey),
+              isNull(userDevices.revokedAt),
+            ),
+          );
+      } catch {
+        // Non-critical update; ignore errors.
+      }
+    }
+    // During a gateway restart we must NOT wipe presence — surviving devices
+    // re-assert via heartbeat and Redis TTLs.
+    if (
+      isShuttingDown ||
+      reason === 'server shutting down' ||
+      reason === 'server namespace disconnect'
+    ) {
+      return;
+    }
+
     if (appRedis) {
-      const fullyOffline = await setOffline(appRedis, userId, socket.id);
+      const deviceHasNoSockets = await unregisterPresenceSocket(
+        appRedis,
+        userId,
+        deviceId,
+        socket.id,
+      );
+      await cleanupStaleSockets(io, appRedis, userId);
+
+      const fullyOffline = deviceHasNoSockets
+        ? await setOffline(appRedis, userId, deviceId)
+        : false;
+
       if (fullyOffline) {
         const user = await db.query.users.findFirst({
           where: eq(users.id, userId),
@@ -181,9 +313,16 @@ io.on('connection', async (socket: AuthSocket) => {
             where: eq(conversationMembers.userId, userId),
             columns: { conversationId: true },
           });
+
+          const { lastSeen } = await deriveDevicePresence(userId);
+
           for (const m of memberships) {
             io.to(m.conversationId).emit('user_offline', { userId });
-            io.to(m.conversationId).emit('presence_update', { userId, online: false });
+            io.to(m.conversationId).emit('presence_update', {
+              userId,
+              online: false,
+              ...(lastSeen ? { lastSeen } : {}),
+            });
           }
           await recordPresenceForCoMembers(
             userId,
@@ -225,6 +364,15 @@ async function attachRedisAdapter(): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[socket.io] Redis unavailable (${message}) — running in single-instance mode`);
     await Promise.allSettled([pubClient.quit(), subClient.quit()]);
+  } finally {
+    if (appRedis) {
+      try {
+        await reconcileBoot(io, appRedis);
+        console.log('[presence] Boot reconciliation complete');
+      } catch (err) {
+        console.warn('[presence] Boot reconciliation failed:', err);
+      }
+    }
   }
 }
 
@@ -236,6 +384,9 @@ httpServer.listen(PORT, () => {
 // Attach the Redis adapter after listen() so the API is reachable even if
 // Redis is unreachable; on failure we fall back to the in-process adapter.
 void attachRedisAdapter();
+
+// #231 – start background file cleanup + push backoff re-enable job
+startFileCleanupJob();
 
 // Subscribe to device_revoked:* channels so any gateway instance can
 // disconnect a revoked device's sockets within seconds, even when the
@@ -270,3 +421,5 @@ if (stellarRpcUrl && tokenTransferContractId) {
     '[stellar-listener] STELLAR_RPC_URL or TOKEN_TRANSFER_CONTRACT_ID unset; listener disabled.',
   );
 }
+
+export { httpServer, io };

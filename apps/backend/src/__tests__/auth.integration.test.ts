@@ -14,6 +14,9 @@ vi.mock('../lib/nonce.js', () => ({
 const mockWalletFindFirst = vi.fn();
 const mockDeviceFindFirst = vi.fn();
 const mockInsert = vi.fn();
+const mockUpdate = vi.fn(() => ({
+  set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }),
+}));
 
 vi.mock('../db/index.js', () => ({
   db: {
@@ -22,6 +25,7 @@ vi.mock('../db/index.js', () => ({
       devices: { findFirst: mockDeviceFindFirst },
     },
     insert: mockInsert,
+    update: mockUpdate,
     execute: vi.fn().mockResolvedValue([]),
   },
 }));
@@ -48,7 +52,7 @@ function resetRateLimiters() {
 const WALLET = 'GABCDEFGHIJKLMNOPQRSTUVWXYZ012345678901234567890123456789AB';
 const SIGNATURE = 'aabbccdd';
 const NONCE = 'test-nonce-abc123';
-const IDENTITY_KEY = 'dGVzdC1pZGVudGl0eS1wdWJsaWMta2V5'; // base64 placeholder
+const IDENTITY_KEY = Buffer.alloc(44, 1).toString('base64'); // 44-byte SPKI placeholder
 
 function setupInsert(userId = 'new-user-id', deviceId = 'new-device-id') {
   // New-user flow inserts: users → wallets → devices (3 calls total).

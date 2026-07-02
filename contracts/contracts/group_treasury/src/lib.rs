@@ -398,11 +398,7 @@ impl GroupTreasuryContract {
             .unwrap_or(0);
         let mut proposals: Vec<WithdrawProposal> = Vec::new(&env);
         for id in 1..=count {
-            if let Some(proposal) = env
-                .storage()
-                .instance()
-                .get(&DataKey::Proposal(id))
-            {
+            if let Some(proposal) = env.storage().instance().get(&DataKey::Proposal(id)) {
                 proposals.push_back(proposal);
             }
         }
@@ -450,7 +446,9 @@ impl GroupTreasuryContract {
         if proposal.status != ProposalStatus::Active {
             panic!("proposal is not pending");
         }
-        if proposal.status == ProposalStatus::Expired || env.ledger().timestamp() >= proposal.expires_at {
+        if proposal.status == ProposalStatus::Expired
+            || env.ledger().timestamp() >= proposal.expires_at
+        {
             panic!("proposal expired");
         }
         if env

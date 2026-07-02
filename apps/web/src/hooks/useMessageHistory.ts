@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Socket } from "socket.io-client";
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { Socket } from 'socket.io-client';
 
 /**
  * Shape we keep in client state. Mirrors the columns the backend currently
@@ -82,18 +82,16 @@ export function useMessageHistory({
     (next: ChatMessage[] | ((current: ChatMessage[]) => ChatMessage[])) =>
       setConversationState((state) => ({
         ...state,
-        messages: typeof next === "function" ? next(state.messages) : next,
+        messages: typeof next === 'function' ? next(state.messages) : next,
       })),
     [],
   );
   const setLoadingOlder = useCallback(
-    (next: boolean) =>
-      setConversationState((state) => ({ ...state, loadingOlder: next })),
+    (next: boolean) => setConversationState((state) => ({ ...state, loadingOlder: next })),
     [],
   );
   const setHasReachedStart = useCallback(
-    (next: boolean) =>
-      setConversationState((state) => ({ ...state, hasReachedStart: next })),
+    (next: boolean) => setConversationState((state) => ({ ...state, hasReachedStart: next })),
     [],
   );
 
@@ -120,22 +118,21 @@ export function useMessageHistory({
         // Backend may return newest-first or oldest-first; normalize to
         // oldest-first so prepending is just a head splice.
         const ordered = [...fresh].sort(
-          (left, right) =>
-            new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
+          (left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
         );
         return [...ordered, ...current];
       });
     }
-    socket.on("message_history", onHistory);
+    socket.on('message_history', onHistory);
     return () => {
-      socket.off("message_history", onHistory);
+      socket.off('message_history', onHistory);
     };
   }, [socket, conversationId, setHasReachedStart, setLoadingOlder, setMessages]);
 
   const loadOlder = useCallback(() => {
     if (!socket || loadingOlder || hasReachedStart) return;
     setLoadingOlder(true);
-    socket.emit("message_history", {
+    socket.emit('message_history', {
       conversationId,
       before: oldestIdRef.current ?? undefined,
     });
