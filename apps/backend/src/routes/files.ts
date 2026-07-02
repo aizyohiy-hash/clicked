@@ -115,6 +115,15 @@ filesRouter.get('/:fileId', async (req: AuthRequest, res) => {
   });
 
   if (!message) {
+    res.status(404).json({ error: 'File not referenced by any message' });
+    return;
+  }
+
+  const file = await db.query.files.findFirst({
+    where: eq(files.id, fileId),
+  });
+
+  if (!file) {
     // File may not yet be attached to a message (upload in progress) — deny.
     res.status(404).json({ error: 'File not found' });
     return;

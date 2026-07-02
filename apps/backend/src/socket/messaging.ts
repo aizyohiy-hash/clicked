@@ -85,16 +85,8 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
   });
 
   // ── send_message ───────────────────────────────────────────────────────────
-  // Payload: { conversationId, messageId, contentType, ciphertext, envelopes, ciphertextSha256? }
-  // Persists the message and broadcasts it to all room members.
-  //
-  // Integrity: when `ciphertextSha256` is present the server computes
-  // SHA-256 over the stored ciphertext and rejects the message on mismatch.
-  // This is a transport-corruption check; the AEAD tag inside the ciphertext
-  // remains the primary integrity mechanism for clients at decryption time.
-  socket.on(
-    'send_message',
-    async (payload: {
+  dispatcher.register('send_message', async (payload) => {
+    const { conversationId, messageId, content, contentType, ciphertext, envelopes, fileId } = payload as {
       conversationId: string;
       messageId?: string;
       content?: string;
@@ -102,11 +94,9 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       ciphertext?: string;
       ciphertextSha256?: string;
       envelopes?: Array<{ recipientDeviceId: string; ciphertext: string }>;
-    }) => {
-      const { conversationId, messageId, contentType, ciphertext, ciphertextSha256, envelopes } =
-        payload;
-      const { conversationId, messageId, content, contentType, ciphertext, envelopes } = payload;
-      const deviceId = socket.auth!.deviceId;
+      fileId?: string;
+    };
+    const deviceId = socket.auth!.deviceId;
 
     // Clear active typing state as soon as the member attempts to send.
     for (const [timerKey, timer] of typingTimers.entries()) {

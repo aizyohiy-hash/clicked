@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { IRouter } from 'express';
 import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { conversationMembers, messages, messageEnvelopes, userDevices } from '../db/schema.js';
+import { conversationMembers, messages, messageEnvelopes, userDevices, files } from '../db/schema.js';
 import { softDeleteFile } from '../services/fileCleanup.js';
 import { requireAuth, type AuthRequest } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
@@ -61,6 +61,16 @@ messagesRouter.post('/', validate(SendMessageSchema), async (req: AuthRequest, r
     return;
   }
 
+  if (fileId) {
+    const fileRecord = await db.query.files.findFirst({
+      where: eq(files.id, fileId),
+    });
+    if (!fileRecord || fileRecord.status !== 'ready') {
+      res.status(400).json({ error: 'File is not ready or does not exist' });
+      return;
+    }
+  }
+
   // ── persist ────────────────────────────────────────────────────────────────
   const [message] = await db
     .insert(messages)
@@ -71,6 +81,7 @@ messagesRouter.post('/', validate(SendMessageSchema), async (req: AuthRequest, r
       senderDeviceId: deviceId ?? null,
       contentType: contentType?.trim().toLowerCase() || 'text',
       ciphertext: ciphertext || null,
+      fileId: fileId || null,
     })
     .returning();
 
